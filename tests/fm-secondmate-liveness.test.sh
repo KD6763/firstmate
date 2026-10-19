@@ -288,6 +288,7 @@ case "${1:-}" in
   display-message)
     for a in "$@"; do
       case "$a" in
+        *pane_id*) printf '%s\n' '%1'; exit 0 ;;
         *pane_current_command*)
           case "$mode" in
             missing) printf '%s\n' node; exit 0 ;;
@@ -299,16 +300,31 @@ case "${1:-}" in
     done
     exit 0
     ;;
+  list-panes)
+    case "$mode" in
+      missing) [ ! -s "$windows" ] || printf '%s\n' '%1'; exit 0 ;;
+      unreadable) exit 1 ;;
+      *) printf '%s\n' '%1'; exit 0 ;;
+    esac
+    ;;
   list-windows)
     case "$mode" in
       missing)
-        printf '%s\n' main
-        [ ! -s "$windows" ] || cat "$windows"
+        if case "$*" in *'#{window_id}|#{window_index}|#{window_name}'*) true ;; *) false ;; esac; then
+          { printf '%s\n' main; [ ! -s "$windows" ] || cat "$windows"; } | sed 's/^/@1|0|/'
+        else
+          printf '%s\n' main
+          [ ! -s "$windows" ] || cat "$windows"
+        fi
         exit 0 ;;
       unreadable) exit 1 ;;
       *)
-        [ -e "${FM_TMUX_CALL_LOG:?}.killed" ] || printf '%s\n' fm-sm1
-        [ ! -s "$windows" ] || cat "$windows"
+        if case "$*" in *'#{window_id}|#{window_index}|#{window_name}'*) true ;; *) false ;; esac; then
+          { [ -e "${FM_TMUX_CALL_LOG:?}.killed" ] || printf '%s\n' fm-sm1; [ ! -s "$windows" ] || cat "$windows"; } | sed 's/^/@1|0|/'
+        else
+          [ -e "${FM_TMUX_CALL_LOG:?}.killed" ] || printf '%s\n' fm-sm1
+          [ ! -s "$windows" ] || cat "$windows"
+        fi
         exit 0 ;;
     esac
     ;;
@@ -328,7 +344,10 @@ case "${1:-}" in
     fi
     [ "${1:-}" = kill-window ] && : > "${FM_TMUX_CALL_LOG}.killed"
     [ "${FM_TEST_FAIL_NEW_WINDOW:-0}" = 1 ] && [ "${1:-}" = new-window ] && exit 1
-    [ "${1:-}" = new-window ] && rm -f "${FM_TMUX_CALL_LOG}.killed"
+    if [ "${1:-}" = new-window ]; then
+      rm -f "${FM_TMUX_CALL_LOG}.killed"
+      printf '%s\n' '@1'
+    fi
     exit 0
     ;;
   has-session) exit 0 ;;
@@ -372,6 +391,7 @@ add_sm_home() {
   git -C "$home" init -q -b main
   {
     printf 'window=%s\n' "$window"
+    printf 'tmux_pane_id=%%1\n'
     printf 'kind=secondmate\n'
     printf 'harness=%s\n' "$harness"
     printf 'home=%s\n' "$home"
@@ -403,6 +423,23 @@ test_sweep_respawns_confirmed_dead_secondmate() {
   assert_grep 'relaunched' "$w/home/state/.secondmate-relaunch-sm1" \
     "the shared library did not leave the durable per-mate relaunch record"
   pass "sweep: a confirmed-dead secondmate endpoint is killed and respawned"
+}
+
+test_sweep_refuses_an_unbound_legacy_secondmate() {
+  local w fb tmuxfb log out
+  w=$(new_world sweep-legacy-unbound)
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  sed '/^tmux_pane_id=/d' "$w/home/state/sm1.meta" > "$w/home/state/sm1.meta.next"
+  mv "$w/home/state/sm1.meta.next" "$w/home/state/sm1.meta"
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" zsh "$log")
+
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: skipped: task has no recorded agent pane; relaunch it to bind one" \
+    "an unbound legacy secondmate did not report the authority refusal"
+  [ ! -s "$log" ] || fail "an unbound legacy secondmate was killed or relaunched: $(cat "$log")"
+  pass "sweep: an unbound legacy secondmate cannot authorize recovery"
 }
 
 test_sweep_recovers_the_durable_secondmate_account() {
@@ -825,6 +862,7 @@ test_tmux_agent_state_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
 test_agent_state_dispatcher_and_compatibility
 test_sweep_respawns_confirmed_dead_secondmate
+test_sweep_refuses_an_unbound_legacy_secondmate
 test_sweep_recovers_the_durable_secondmate_account
 test_sweep_serializes_distinct_secondmate_relaunches
 test_sweep_leaves_alive_secondmate_untouched

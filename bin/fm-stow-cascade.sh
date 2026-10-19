@@ -124,13 +124,17 @@ resolve_local_transport() { # <id> <resolved-home>
     return 0
   fi
   backend=$(fm_backend_of_meta "$meta")
-  target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
+  target=$(fm_backend_agent_authority_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
   if [ "$target_rc" -eq 2 ]; then
     set_transport direct 'recorded agent endpoint is missing'
     return 0
   fi
   if [ "$target_rc" -ne 0 ]; then
-    set_transport unavailable 'recorded agent endpoint is unreadable'
+    if [ "$backend" = tmux ] && ! grep -Eq '^tmux_pane_id=.+$' "$meta" 2>/dev/null; then
+      set_transport unavailable 'task has no recorded agent pane; relaunch it to bind one'
+    else
+      set_transport unavailable 'recorded agent endpoint is unreadable'
+    fi
     return 0
   fi
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || printf 'unreadable')" in

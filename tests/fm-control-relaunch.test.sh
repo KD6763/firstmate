@@ -223,6 +223,7 @@ Preserve the task while replacing its agent process.
 EOF
   {
     echo "window=$ses:fm-$id"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=$id"
     echo "worktree=$wt"
     echo "project=$proj"
@@ -379,7 +380,6 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   local dir out rc gen_before gen_after
   dir=$(new_case same rl1)
   add_ship_task "$dir" rl1 claude
-  printf 'tmux_pane_id=%%9\n' >> "$dir/home/state/rl1.meta"
   : > "$dir/fake/split"
   gen_before=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl1)
   printf 'busy_gen=%s\n' "$gen_before" >> "$dir/home/state/rl1.meta"
@@ -1002,6 +1002,7 @@ SH
     printf '%s openai-codex/gpt-5.5\n' "$harness" > "$dir/home/config/secondmate-harness"
     {
       printf 'window=fmses:fm-%s\nendpoint_task_id=%s\n' "$id" "$id"
+      printf 'tmux_pane_id=%%9\n'
       printf 'worktree=%s\nproject=%s\nhome=%s\n' "$dir/wt" "$dir/wt" "$dir/wt"
       printf 'harness=%s\nkind=secondmate\nmode=secondmate\nyolo=off\nmodel=default\neffort=default\n' "$harness"
     } > "$dir/home/state/$id.meta"
@@ -1189,6 +1190,7 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin() {
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
   {
     echo "window=fmses:fm-sm3"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm3"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1232,6 +1234,7 @@ test_secondmate_claude_relaunch_keeps_local_settings() {
   printf 'gen=retired\n' > "$dir/smhome/.fm-busy-stop"
   {
     echo "window=fmses:fm-sml"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sml"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1271,6 +1274,7 @@ test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop() {
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
   {
     echo "window=fmses:fm-sm6"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm6"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1312,6 +1316,7 @@ test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop() {
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
   {
     echo "window=fmses:fm-sm7"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm7"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1350,6 +1355,7 @@ test_explicit_secondmate_harness_ignores_configured_profile_axes() {
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
   {
     echo "window=fmses:fm-sm4"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm4"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1435,6 +1441,7 @@ test_promoted_scout_relaunch_receives_the_current_delivery_contract() {
     mv "$brief.filled" "$brief"
     {
       echo "window=fmses:fm-$id"
+      echo "tmux_pane_id=%9"
       echo "endpoint_task_id=$id"
       echo "worktree=$dir/wt"
       echo "project=$dir/proj"
@@ -1777,6 +1784,7 @@ test_secondmate_relaunch_checkpoints_child_work_and_spares_the_charter() {
   printf 'window=x:fm-c2\n' > "$dir/smhome/state/c2.meta"
   {
     echo "window=fmses:fm-sm1"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm1"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1816,6 +1824,7 @@ test_secondmate_relaunch_refuses_an_unmarked_home() {
   printf 'someone-else\n' > "$dir/smhome/.fm-secondmate-home"
   {
     echo "window=fmses:fm-sm2"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm2"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1844,6 +1853,7 @@ test_secondmate_checkpoint_refuses_unreadable_child_state() {
   printf 'sm5\n' > "$dir/smhome/.fm-secondmate-home"
   {
     echo "window=fmses:fm-sm5"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm5"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1894,6 +1904,7 @@ test_secondmate_checkpoint_ignores_a_vanished_scratch_find_walk() {
   : > "$dir/smhome/state/.last-0"
   {
     echo "window=fmses:fm-sm6"
+    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm6"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -2029,6 +2040,30 @@ test_spawn_relaunch_refuses_a_live_agent() {
   assert_contains "$out" "positively agent-free endpoint" "the refusal should demand an agent-free endpoint"
   assert_contains "$out" "fm-control.sh rl15 exit" "the refusal should point at the way to stop it"
   pass "fm-spawn --relaunch: refuses to launch a second agent into a live endpoint"
+}
+
+test_unbound_legacy_relaunch_refuses_before_any_authority_action() {
+  local dir out rc before
+  dir=$(new_case legacy-unbound rl76)
+  add_ship_task "$dir" rl76 claude
+  sed '/^tmux_pane_id=/d' "$dir/home/state/rl76.meta" > "$dir/home/state/rl76.meta.next"
+  mv "$dir/home/state/rl76.meta.next" "$dir/home/state/rl76.meta"
+  before=$(cksum "$dir/home/state/rl76.meta" "$dir/home/data/rl76/brief.md")
+
+  out=$(run_spawn "$dir" rl76 --relaunch --harness claude); rc=$?
+  expect_code 1 "$rc" "direct relaunch must refuse an unbound legacy task"
+  assert_contains "$out" "task has no recorded agent pane; relaunch it to bind one" \
+    "direct relaunch did not explain the missing authority binding"
+  [ ! -s "$dir/fake/literal" ] || fail "direct relaunch sent input before refusing the unbound record"
+
+  out=$(run_control "$dir" rl76 relaunch --note "must remain untouched"); rc=$?
+  expect_code 1 "$rc" "control relaunch must refuse an unbound legacy task"
+  assert_contains "$out" "task has no recorded agent pane; relaunch it to bind one" \
+    "control relaunch did not explain the missing authority binding"
+  [ ! -s "$dir/fake/literal" ] || fail "control relaunch stopped or launched an agent before refusing"
+  [ "$(cksum "$dir/home/state/rl76.meta" "$dir/home/data/rl76/brief.md")" = "$before" ] \
+    || fail "an unbound relaunch refusal changed task metadata or instructions"
+  pass "unbound legacy records cannot authorize either relaunch path"
 }
 
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection() {
@@ -2853,6 +2888,7 @@ test_concurrent_relaunch_is_refused
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock
 test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution
 test_spawn_relaunch_refuses_a_live_agent
+test_unbound_legacy_relaunch_refuses_before_any_authority_action
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection
 test_spawn_relaunch_keeps_its_early_meta_lock_continuous
 test_spawn_relaunch_refuses_a_pending_authoritative_close

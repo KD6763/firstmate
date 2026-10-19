@@ -1209,7 +1209,7 @@ if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
     TEARDOWN_LEGACY_ENDPOINT=missing
   else
     TEARDOWN_LEGACY_IO_STATUS=0
-    TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_io_target_of_meta "$META") \
+    TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$META") \
       || TEARDOWN_LEGACY_IO_STATUS=$?
     case "$TEARDOWN_LEGACY_IO_STATUS" in
       0) TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$TEARDOWN_LEGACY_IO_TARGET") ;;

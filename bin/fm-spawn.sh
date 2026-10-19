@@ -2100,7 +2100,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fm_backend_validate_task_endpoint "$RELAUNCH_META" "$ID" || exit 1
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
-  RELAUNCH_IO_TARGET=$(fm_backend_io_target_of_meta "$RELAUNCH_META") || exit 1
+  RELAUNCH_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$RELAUNCH_META") || exit 1
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
   # A relaunch must PROVE the previous agent is gone before it launches another
@@ -4091,7 +4091,7 @@ herdr_projection_existing_meta_allows_flat() { # <meta>
       ;;
     esac
   fi
-  if old_io_target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null); then
+  if old_io_target=$(fm_backend_agent_authority_target_of_meta "$meta"); then
     :
   else
     rc=$?

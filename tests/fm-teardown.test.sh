@@ -1865,7 +1865,7 @@ assert_legacy_endpoint_refusal() {
 }
 
 test_legacy_record_authority_uses_the_agent_pane() {
-  local case_dir agent_pane agent_pid monitor_pane before rc out
+  local case_dir agent_pane agent_pid monitor_pane destination_pane before rc out resolved
 
   case_dir=$(make_case legacy-split-live)
   prepare_landed_legacy_tmux_case "$case_dir"
@@ -1874,15 +1874,24 @@ test_legacy_record_authority_uses_the_agent_pane() {
   agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
   agent_pid=$("$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_pid}')
   monitor_pane=$("$case_dir/fakebin/tmux" split-window -d -P -F '#{pane_id}' -t firstmate:fm-task-x1)
-  "$case_dir/fakebin/tmux" select-pane -t "$monitor_pane"
-  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-split-live: fake agent exited before teardown"
+  destination_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n moved-agent)
+  "$case_dir/fakebin/tmux" join-pane -d -s "$agent_pane" -t "$destination_pane"
+  resolved=$(PATH="$case_dir/fakebin:$PATH" bash -c \
+    '. "$1/bin/fm-backend.sh"; fm_backend_io_target_of_meta "$2"' \
+    _ "$ROOT" "$case_dir/state/task-x1.meta") \
+    || fail "legacy-moved-live: baseline I/O could not resolve the surviving monitor"
+  [ "$resolved" = "$monitor_pane" ] \
+    || fail "legacy-moved-live: baseline I/O did not follow the remaining monitor"
+  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-moved-live: fake agent exited before teardown"
   before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
   rc=0
   run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  assert_legacy_endpoint_refusal "$case_dir" legacy-split-live "$before" "$rc"
+  assert_legacy_endpoint_refusal "$case_dir" legacy-moved-live "$before" "$rc"
+  grep -Fq 'task has no recorded agent pane; relaunch it to bind one' "$case_dir/stderr" \
+    || fail "legacy-moved-live: refusal did not explain how to establish authority"
   [ "$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')" = "$monitor_pane" ] \
-    || fail "legacy-split-live: refusal did not preserve the active monitor"
-  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-split-live: refusal terminated the live agent"
+    || fail "legacy-moved-live: refusal did not preserve the surviving monitor"
+  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-moved-live: refusal terminated the moved live agent"
   "$case_dir/fakebin/tmux" kill-server
 
   case_dir=$(make_case legacy-single-live)
@@ -1894,20 +1903,21 @@ test_legacy_record_authority_uses_the_agent_pane() {
   rc=0
   run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   assert_legacy_endpoint_refusal "$case_dir" legacy-single-live "$before" "$rc"
-  grep -q "reads 'alive'" "$case_dir/stderr" \
-    || fail "legacy-single-live: the sole legacy pane was not classified as the live agent"
+  grep -Fq 'task has no recorded agent pane; relaunch it to bind one' "$case_dir/stderr" \
+    || fail "legacy-single-live: refusal did not explain how to establish authority"
   kill -0 "$agent_pid" 2>/dev/null || fail "legacy-single-live: refusal terminated the live agent"
   "$case_dir/fakebin/tmux" kill-server
 
   case_dir=$(make_case legacy-single-dead)
   prepare_landed_legacy_tmux_case "$case_dir"
   "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-  out=$(run_teardown "$case_dir" --legacy-record) \
-    || fail "legacy-single-dead: teardown refused an idle sole pane"
-  printf '%s\n' "$out" | grep -Fq 'legacy record accepted without spawn_gen: endpoint dead' \
-    || fail "legacy-single-dead: completion did not report the dead agent pane"
-  assert_absent "$case_dir/state/task-x1.meta" \
-    "legacy-single-dead: teardown left the task record"
+  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+  rc=0
+  run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  assert_legacy_endpoint_refusal "$case_dir" legacy-single-dead "$before" "$rc"
+  grep -Fq 'task has no recorded agent pane; relaunch it to bind one' "$case_dir/stderr" \
+    || fail "legacy-single-dead: refusal did not explain how to establish authority"
+  "$case_dir/fakebin/tmux" kill-server
 
   case_dir=$(make_case legacy-pane-missing)
   prepare_landed_legacy_tmux_case "$case_dir"
@@ -1923,6 +1933,8 @@ test_legacy_record_authority_uses_the_agent_pane() {
   case_dir=$(make_case legacy-inventory-unreadable)
   prepare_landed_legacy_tmux_case "$case_dir"
   "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+  agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
+  printf 'tmux_pane_id=%s\n' "$agent_pane" >> "$case_dir/state/task-x1.meta"
   : > "$case_dir/tmux-unreadable"
   before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
   rc=0

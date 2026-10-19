@@ -243,6 +243,7 @@ add_task() {
   printf '# brief for %s\n' "$id" > "$home/data/$id/brief.md"
   {
     echo "window=$window"
+    [ "$backend" != tmux ] || echo "tmux_pane_id=%9"
     echo "endpoint_task_id=$id"
     echo "worktree=$wt"
     echo "project=$proj"
@@ -839,6 +840,28 @@ test_already_stopped_exit_is_idempotent() {
   pass "fm-control exit: an already-stopped agent is idempotent success with no bytes sent"
 }
 
+test_unbound_legacy_endpoint_grants_no_control_authority() {
+  local dir out rc
+  dir=$(new_case legacy-unbound)
+  add_task "$dir" t1 claude
+  sed '/^tmux_pane_id=/d' "$dir/home/state/t1.meta" > "$dir/home/state/t1.meta.next"
+  mv "$dir/home/state/t1.meta.next" "$dir/home/state/t1.meta"
+  alive_as "$dir" claude
+
+  out=$(run_control "$dir" t1 interrupt); rc=$?
+  expect_code 1 "$rc" "an unbound legacy endpoint must not authorize interrupt"
+  assert_contains "$out" "task has no recorded agent pane; relaunch it to bind one" \
+    "interrupt did not explain how to establish control authority"
+
+  out=$(run_control "$dir" t1 exit); rc=$?
+  expect_code 1 "$rc" "an unbound legacy endpoint must not authorize exit"
+  assert_contains "$out" "task has no recorded agent pane; relaunch it to bind one" \
+    "exit did not explain how to establish control authority"
+  [ ! -s "$dir/fake/keys" ] || fail "an unbound control refusal still sent a key"
+  [ ! -s "$dir/fake/literal" ] || fail "an unbound control refusal still typed text"
+  pass "fm-control: unbound legacy endpoints grant no lifecycle authority"
+}
+
 test_missing_tmux_endpoint_refuses_rather_than_claiming_a_stop() {
   local dir out rc
   dir=$(new_case gone)
@@ -1249,6 +1272,7 @@ test_verb_allowlist_is_closed
 test_resume_is_refused_with_its_reason
 test_relaunch_only_flags_are_rejected_on_other_verbs
 test_already_stopped_exit_is_idempotent
+test_unbound_legacy_endpoint_grants_no_control_authority
 test_missing_tmux_endpoint_refuses_rather_than_claiming_a_stop
 test_interrupt_refuses_when_no_agent_runs
 test_ambiguous_endpoint_refuses

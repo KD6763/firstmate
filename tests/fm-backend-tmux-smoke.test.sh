@@ -545,6 +545,43 @@ fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta" >/dev/null 2>&
 rm "$SHIM_DIR/fail-global-window-inventory"
 pass "real tmux: moved, absent and unreadable missing-window bindings remain distinct"
 
+LEGACY_LIVE_WINDOW="$SESSION:fm-legacy-moved"
+LEGACY_LIVE_AGENT=$(tmux new-window -dP -F '#{pane_id}' -t "$SESSION:" -n fm-legacy-moved \
+  "bash -c 'exec -a codex sleep 60'") \
+  || fail "real tmux: could not start legacy moved-agent fixture"
+LEGACY_LIVE_MONITOR=$(tmux split-window -dP -F '#{pane_id}' -t "$LEGACY_LIVE_AGENT" \
+  "bash -c 'printf \"legacy-monitor-ready\\n\"; sleep 60'") \
+  || fail "real tmux: could not start surviving legacy monitor"
+wait_for_capture_text "$LEGACY_LIVE_MONITOR" legacy-monitor-ready \
+  || fail "legacy surviving monitor did not start"
+printf 'window=%s\nharness=codex\nkind=secondmate\n' "$LEGACY_LIVE_WINDOW" \
+  > "$PANE_HOME/state/legacy-moved.meta"
+tmux join-pane -d -s "$LEGACY_LIVE_AGENT" -t "$FOREIGN_PANE" \
+  || fail "real tmux: could not move the legacy agent away from its monitor"
+[ "$(fm_backend_io_target_of_meta "$PANE_HOME/state/legacy-moved.meta")" = "$LEGACY_LIVE_MONITOR" ] \
+  || fail "legacy-compatible I/O did not follow the recorded window's remaining pane"
+peek=$(FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PANE_HOME/state" \
+  FM_CONFIG_OVERRIDE="$PANE_HOME/config" FM_DATA_OVERRIDE="$PANE_HOME/data" \
+  bash "$ROOT/bin/fm-peek.sh" legacy-moved 10) \
+  || fail "legacy-compatible peek could not read the remaining monitor"
+printf '%s\n' "$peek" | grep -q legacy-monitor-ready \
+  || fail "legacy-compatible peek no longer matches baseline remaining-pane behavior"
+authority_error=$(fm_backend_agent_authority_target_of_meta \
+  "$PANE_HOME/state/legacy-moved.meta" 2>&1)
+[ "$?" = 1 ] || fail "an unbound moved-agent record granted lifecycle authority"
+printf '%s\n' "$authority_error" | grep -Fq 'task has no recorded agent pane; relaunch it to bind one' \
+  || fail "the strict target refusal was not actionable: $authority_error"
+probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
+  . "$1"
+  fm_secondmate_liveness_probe "$2" legacy-moved poll
+  printf "%s|%s|%s|%s" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_KILL" "$FM_SM_LIVE_REASON"
+' _ "$ROOT/bin/fm-secondmate-liveness-lib.sh" "$PANE_HOME/state/legacy-moved.meta")
+[ "$probe" = 'skipped|unreadable|0|task has no recorded agent pane; relaunch it to bind one' ] \
+  || fail "legacy secondmate recovery gained authority from its surviving monitor: $probe"
+fm_backend_target_exists tmux "$LEGACY_LIVE_AGENT" \
+  || fail "authority refusal did not preserve the moved live agent"
+pass "real tmux: moved legacy agents retain baseline reads but grant no recovery authority"
+
 tmux kill-server
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "an authoritatively absent tmux server became an unreadable pane binding"

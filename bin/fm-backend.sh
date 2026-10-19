@@ -385,6 +385,24 @@ fm_backend_io_target_of_meta() {  # <meta-file>
   fm_backend_tmux_task_pane "$window" "$pane"
 }
 
+fm_backend_agent_authority_target_of_meta() {  # <meta-file>
+  local meta=$1 pane_count
+  if [ "$(fm_backend_of_meta "$meta")" = tmux ]; then
+    pane_count=$(grep -c '^tmux_pane_id=' "$meta" 2>/dev/null || true)
+    if [ "$pane_count" -eq 0 ]; then
+      echo "error: task has no recorded agent pane; relaunch it to bind one" >&2
+      return 1
+    fi
+    if [ "$pane_count" -eq 1 ]; then
+      fm_backend_meta_exact_value "$meta" tmux_pane_id >/dev/null 2>&1 || {
+        echo "error: task has no recorded agent pane; relaunch it to bind one" >&2
+        return 1
+      }
+    fi
+  fi
+  fm_backend_io_target_of_meta "$meta"
+}
+
 # fm_backend_validate_task_endpoint: validate a task cleanup record entirely
 # from its durable metadata before any runtime command or cleanup mutation.
 # The validation binds the exact task id, selected backend, target, project,

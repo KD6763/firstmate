@@ -357,7 +357,7 @@ fi
 
 fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
 BACKEND=$FM_BACKEND_VALIDATED_BACKEND
-T=$(fm_backend_io_target_of_meta "$META") || exit 1
+T=$(fm_backend_agent_authority_target_of_meta "$META") || exit 1
 LABEL="fm-$ID"
 RECORDED_HARNESS=$(fm_meta_get "$META" harness)
 KIND=$(fm_meta_get "$META" kind)

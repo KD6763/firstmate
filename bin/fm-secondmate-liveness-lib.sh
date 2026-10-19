@@ -215,7 +215,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
 
   local backend target target_rc=0 lifecycle_target
   backend=$(fm_backend_of_meta "$meta")
-  target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
+  target=$(fm_backend_agent_authority_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
   if [ "$target_rc" -eq 0 ]; then
     agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
   elif [ "$target_rc" -eq 2 ]; then
@@ -255,7 +255,11 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
       FM_SM_LIVE_REASON="existing endpoint has ambiguous agent process (backend=$backend)"
       ;;
     unreadable)
-      FM_SM_LIVE_REASON="endpoint probe unreadable (backend=$backend)"
+      if [ "$backend" = tmux ] && ! grep -Eq '^tmux_pane_id=.+$' "$meta" 2>/dev/null; then
+        FM_SM_LIVE_REASON="task has no recorded agent pane; relaunch it to bind one"
+      else
+        FM_SM_LIVE_REASON="endpoint probe unreadable (backend=$backend)"
+      fi
       ;;
     unverified-harness)
       FM_SM_LIVE_REASON="recorded harness '$harness' is unverified for recovery (backend=$backend)"
