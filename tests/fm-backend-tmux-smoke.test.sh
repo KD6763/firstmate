@@ -496,5 +496,24 @@ fm_backend_target_exists tmux "$MONITOR_PANE" && fail "window cleanup left monit
 tmux has-session -t "$OTHER_SESSION" || fail "cleanup touched another session"
 pass "real tmux: lifecycle cleanup retains the whole-window target"
 
+MOVED_WINDOW="$SESSION:fm-moved"
+MOVED_PANE=$(tmux new-window -dP -F '#{pane_id}' -t "$SESSION:" -n fm-moved 'sleep 60') \
+  || fail "real tmux: could not start moved-pane fixture"
+printf 'window=%s\ntmux_pane_id=%s\nharness=codex\nkind=scout\n' \
+  "$MOVED_WINDOW" "$MOVED_PANE" > "$PANE_HOME/state/moved.meta"
+tmux join-pane -d -s "$MOVED_PANE" -t "$FOREIGN_PANE" \
+  || fail "real tmux: could not move the recorded pane"
+fm_backend_target_exists tmux "$MOVED_WINDOW" && fail "moved pane left its original window alive"
+fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
+[ "$?" = 1 ] || fail "a moved live pane was mistaken for a missing endpoint"
+tmux kill-pane -t "$MOVED_PANE"
+touch "$SHIM_DIR/fail-global-pane-inventory"
+fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
+[ "$?" = 1 ] || fail "an unreadable global inventory proved a missing window binding absent"
+rm "$SHIM_DIR/fail-global-pane-inventory"
+fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
+[ "$?" = 2 ] || fail "a readable global inventory did not prove a missing window binding absent"
+pass "real tmux: moved, absent and unreadable missing-window bindings remain distinct"
+
 cleanup_all
 trap - EXIT

@@ -77,7 +77,15 @@ case "${1:-}" in
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  list-panes) printf '%%1\n'; exit 0 ;;
+  list-panes)
+    if [ -n "${FM_FAKE_TMUX_LIST_PANES_COUNT:-}" ]; then
+      count=$(cat "$FM_FAKE_TMUX_LIST_PANES_COUNT" 2>/dev/null || printf '0')
+      count=$((count + 1))
+      printf '%s\n' "$count" > "$FM_FAKE_TMUX_LIST_PANES_COUNT"
+      [ "$count" != "${FM_FAKE_TMUX_FAIL_LIST_PANES_AT:-}" ] || exit 1
+    fi
+    printf '%%1\n'
+    exit 0 ;;
   list-windows)
     case "$*" in
       *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|fm-t1\n@2|1|win\n@3|2|fm-domain\n' ;;
@@ -448,6 +456,26 @@ test_meta_lock_contention_fails_bounded() {
   pass "fm-send inbox: metadata lock contention fails bounded without enqueue"
 }
 
+test_final_endpoint_resolution_failure_cleans_up() {
+  local dir err rc count
+  dir=$(setup_case endpoint-race)
+  err="$dir/send.err"
+  count="$dir/list-panes.count"
+  fm_write_secondmate_meta "$dir/home/state/domain.meta" "$dir/home" "sess:fm-domain"
+  run_send "$dir" "$err" \
+    FM_FAKE_TMUX_LIST_PANES_COUNT="$count" FM_FAKE_TMUX_FAIL_LIST_PANES_AT=2 -- \
+    domain "must not leave a reply expectation"
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a failed final endpoint resolution accepted the steer"
+  [ ! -d "$dir/home/state/.meta-domain.lock" ] || fail "a failed final resolution retained the metadata lock"
+  [ ! -d "$dir/home/state/domain.inbox" ] || fail "a failed final resolution enqueued the steer"
+  [ -z "$(find "$dir/home/state/pending-replies" -type f -not -name '.*' 2>/dev/null)" ] ||
+    fail "a failed final resolution retained an undelivered pending reply"
+  assert_contains "$(cat "$err")" "retired or changed endpoint" \
+    "a failed final resolution did not use the endpoint-change refusal"
+  pass "fm-send inbox: final endpoint resolution failure releases and discards"
+}
+
 test_unwritable_inbox_fails_loudly() {
   local dir err rc
   dir=$(setup_case unwritable)
@@ -524,5 +552,6 @@ test_key_path_never_touches_inbox
 test_secondmate_marker_and_enqueue_delivery
 test_post_enqueue_bookkeeping_failure_is_not_retryable
 test_meta_lock_contention_fails_bounded
+test_final_endpoint_resolution_failure_cleans_up
 test_unwritable_inbox_fails_loudly
 test_empty_message_refused

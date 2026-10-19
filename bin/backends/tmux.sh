@@ -205,6 +205,11 @@ fm_backend_tmux_task_pane() {  # <session:window> [recorded-pane-id]
   wid=$(fm_backend_tmux_window_id "${session#=}" "${window#=}") || {
     rc=$?
     echo "error: cannot resolve exact tmux window $target; refusing task I/O" >&2
+    if [ -n "$pane" ] && [ "$rc" -eq 2 ]; then
+      all_panes=$(tmux list-panes -a -F '#{pane_id}' 2>/dev/null) || return 1
+      printf '%s\n' "$all_panes" | grep -Fqx -- "$pane" && return 1
+      return 2
+    fi
     return "$rc"
   }
   panes=$(tmux list-panes -t "$wid" -F '#{pane_id}' 2>/dev/null) || return 1

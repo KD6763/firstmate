@@ -916,15 +916,24 @@ for meta in "$STATE"/*.meta; do
   cat "$meta"
 
   window=$(fm_meta_get "$meta" window)
-  target=$(fm_backend_target_of_meta "$meta")
+  target=
+  target_rc=0
+  target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
   if [ -n "$window" ]; then
     backend=$(fm_backend_of_meta "$meta")
     endpoint_rc=0
-    fm_session_start_endpoint_read "$backend" "${target:-$window}" "fm-$id" || endpoint_rc=$?
+    if [ "$target_rc" -eq 0 ]; then
+      fm_session_start_endpoint_read "$backend" "$target" "fm-$id" || endpoint_rc=$?
+    else
+      endpoint_rc=1
+    fi
     # Only the timeout owner's own statuses mean the read itself failed: 124 is
     # the bound firing and >=128 is a signal death. Every other nonzero status
     # is the probe's own verdict that the endpoint is gone.
-    if [ "$endpoint_rc" -eq 0 ]; then
+    if [ "$target_rc" -ne 0 ] && [ "$target_rc" -ne 2 ]; then
+      printf 'endpoint: error (backend=%s window=%s - the recorded endpoint identity could not be verified)\n' \
+        "$backend" "$window"
+    elif [ "$endpoint_rc" -eq 0 ]; then
       printf 'endpoint: alive (backend=%s window=%s)\n' "$backend" "$window"
     elif [ "$endpoint_rc" -eq 124 ] || [ "$endpoint_rc" -ge 128 ]; then
       printf 'endpoint: error (backend=%s window=%s - the endpoint read died or hit its %ss bound; the digest continued past it)\n' \

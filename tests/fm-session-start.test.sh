@@ -295,10 +295,10 @@ SH
   chmod +x "$fakebin/ps"
 }
 
-# make_fake_tmux <fakebin> <live-target>: the window inventory contains only
-# the given live target's window.
+# make_fake_tmux <fakebin> <live-target> [split-monitor-target]
 make_fake_tmux() {
-  local fakebin=$1 live=$2 live_window=${2#*:}
+  local fakebin=$1 live=$2 split=${3:-} live_window=${2#*:} split_window
+  split_window=${split#*:}
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
@@ -310,11 +310,46 @@ case "\${1:-}" in
       [ "\$prev" = "-t" ] && target="\$a"
       prev="\$a"
     done
-    [ "\$target" = "$live" ] && { printf '%%1\n'; exit 0; }
+    case "\$target" in
+      %1) printf '%%1\n'; exit 0 ;;
+      %4) [ -n "$split" ] && { printf '%%4\n'; exit 0; } ;;
+      "$live") printf '%%1\n'; exit 0 ;;
+      "$split") [ -n "$split" ] && { printf '%%4\n'; exit 0; } ;;
+    esac
     exit 1
     ;;
+  list-panes)
+    target=
+    all=0
+    prev=
+    for a in "\$@"; do
+      [ "\$prev" = -t ] && target=\$a
+      [ "\$a" != -a ] || all=1
+      prev=\$a
+    done
+    if [ "\$all" = 1 ]; then
+      printf '%%1\n'
+      [ -z "$split" ] || printf '%%4\n'
+    elif [ "\$target" = @1 ]; then
+      printf '%%1\n'
+    elif [ "\$target" = @2 ] && [ -n "$split" ]; then
+      printf '%%4\n'
+    else
+      exit 1
+    fi
+    exit 0
+    ;;
   list-windows)
-    printf '%s\n' "$live_window"
+    case "\$*" in
+      *'#{window_id}|#{window_index}|#{window_name}'*)
+        printf '@1|0|%s\n' "$live_window"
+        [ -z "$split" ] || printf '@2|1|%s\n' "$split_window"
+        ;;
+      *)
+        printf '%s\n' "$live_window"
+        [ -z "$split" ] || printf '%s\n' "$split_window"
+        ;;
+    esac
     exit 0
     ;;
 esac
@@ -352,7 +387,13 @@ case "${1:-}" in
     if [ "${target#%}" != "$target" ]; then
       case "$format" in
         *pane_current_path*) printf '%s\n' "$mate_home" ;;
-        *pane_current_command*) printf '%s\n' node ;;
+        *pane_current_command*)
+          if [ "$mode" = shell ] && [ ! -e "$spawned" ]; then
+            printf '%s\n' zsh
+          else
+            printf '%s\n' node
+          fi
+          ;;
         *) printf '%s\n' "$target" ;;
       esac
       exit 0
@@ -380,17 +421,55 @@ case "${1:-}" in
       unreadable) exit 1 ;;
     esac
     ;;
+  list-panes)
+    present=0
+    if [ -e "$spawned" ]; then
+      present=1
+    elif [ ! -e "$killed" ] && { [ "$mode" = ambiguous ] || [ "$mode" = shell ]; }; then
+      present=1
+    fi
+    target=
+    all=0
+    prev=
+    for arg in "$@"; do
+      [ "$prev" = -t ] && target=$arg
+      [ "$arg" != -a ] || all=1
+      prev=$arg
+    done
+    if [ "$all" -eq 1 ]; then
+      if [ "$present" -eq 1 ]; then printf '%%1\n'; else printf '%%fallback\n'; fi
+    elif [ "$target" = @1 ] && [ "$present" -eq 1 ]; then
+      printf '%%1\n'
+    else
+      exit 1
+    fi
+    ;;
   list-windows)
     if [ "$mode" = unreadable ] && [ ! -e "$spawned" ] && [ ! -e "$killed" ]; then
       exit 1
     fi
+    present=0
     if [ -e "$spawned" ]; then
-      printf '%s\n' "$mate_window"
+      present=1
     elif [ ! -e "$killed" ] && { [ "$mode" = ambiguous ] || [ "$mode" = shell ]; }; then
-      printf '%s\n' "$mate_window"
-    else
-      printf '%s\n' main
+      present=1
     fi
+    case "$*" in
+      *'#{window_id}|#{window_index}|#{window_name}'*)
+        if [ "$present" -eq 1 ]; then
+          printf '@1|0|%s\n' "$mate_window"
+        else
+          printf '@0|0|main\n'
+        fi
+        ;;
+      *)
+        if [ "$present" -eq 1 ]; then
+          printf '%s\n' "$mate_window"
+        else
+          printf '%s\n' main
+        fi
+        ;;
+    esac
     exit 0
     ;;
   has-session) exit 0 ;;
@@ -402,7 +481,7 @@ case "${1:-}" in
   new-window)
     printf '%s\n' "$*" >> "$log"
     : > "$spawned"
-    printf '%%1\n'
+    printf '@1\n'
     exit 0
     ;;
   set-window-option|send-keys) exit 0 ;;
@@ -609,12 +688,14 @@ EOF
   mate="$w/secondmate-$id"
   log="$w/tmux.log"
   spawned="$w/tmux.spawned"
+  printf '# Firstmate\n' > "$root/AGENTS.md"
+  printf '%s\n' 'projects/' 'state/' 'data/' 'config/' '.no-mistakes/' '.fm-secondmate-home' > "$root/.gitignore"
+  git -C "$root" add AGENTS.md .gitignore
+  git -C "$root" commit -qm secondmate-base
+  git -C "$root" worktree add -q --detach "$mate" main
   mkdir -p "$mate/bin" "$mate/data" "$mate/state" "$mate/config" "$mate/projects"
   printf '%s\n' "$id" > "$mate/.fm-secondmate-home"
-  printf '# Firstmate\n' > "$mate/AGENTS.md"
   printf 'Second mate charter.\n' > "$mate/data/charter.md"
-  printf '%s\n' 'projects/' 'state/' 'data/' 'config/' '.no-mistakes/' > "$mate/.gitignore"
-  git -C "$mate" init -q -b main
   printf '%s\n' pi > "$home/config/secondmate-harness"
   printf '%s\n' manual > "$home/config/backlog-backend"
   touch "$home/state/.last-watcher-beat"
@@ -652,12 +733,14 @@ EOF
   mate="$w/secondmate-$id"
   log="$w/herdr.log"
   state="$w/herdr.state"
+  printf '# Firstmate\n' > "$root/AGENTS.md"
+  printf '%s\n' 'projects/' 'state/' 'data/' 'config/' '.no-mistakes/' '.fm-secondmate-home' > "$root/.gitignore"
+  git -C "$root" add AGENTS.md .gitignore
+  git -C "$root" commit -qm secondmate-base
+  git -C "$root" worktree add -q --detach "$mate" main
   mkdir -p "$mate/bin" "$mate/data" "$mate/state" "$mate/config" "$mate/projects"
   printf '%s\n' "$id" > "$mate/.fm-secondmate-home"
-  printf '# Firstmate\n' > "$mate/AGENTS.md"
   printf 'Second mate charter.\n' > "$mate/data/charter.md"
-  printf '%s\n' 'projects/' 'state/' 'data/' 'config/' '.no-mistakes/' > "$mate/.gitignore"
-  git -C "$mate" init -q -b main
   printf '%s\n' herdr > "$home/config/backend"
   printf '%s\n' pi > "$home/config/secondmate-harness"
   printf '%s\n' manual > "$home/config/backlog-backend"
@@ -1339,8 +1422,9 @@ EOF
     "SECONDMATE_LIVENESS: secondmate $SESSION_START_SECOND_MATE_ID: skipped: endpoint probe unreadable (backend=tmux)" \
     "session start did not distinguish transient unreadability from absence"
   [ ! -s "$log" ] || fail "session start touched a transiently unreadable target: $(cat "$log")"
-  assert_contains "$out" "endpoint: dead (backend=tmux window=firstmate:fm-$SESSION_START_SECOND_MATE_ID)" \
-    "the later cheap presence read should preserve the visible offline symptom"
+  assert_contains "$out" \
+    "endpoint: error (backend=tmux window=firstmate:fm-$SESSION_START_SECOND_MATE_ID - the recorded endpoint identity could not be verified)" \
+    "the later fleet read treated an unreadable identity as proven dead"
   pass "session start: transient tmux unreadability never licenses a relaunch"
 }
 
@@ -1391,16 +1475,17 @@ $rec
 EOF
   make_fake_toolchain "$fakebin"
   make_fake_ps_claude "$fakebin"
-  make_fake_tmux "$fakebin" "fm-sess:live-window"
+  make_fake_tmux "$fakebin" "fm-sess:live-window" "fm-sess:split-window"
 
-  printf 'window=fm-sess:live-window\nkind=ship\n' > "$home/state/task-live.meta"
-  printf 'window=fm-sess:dead-window\nkind=ship\n' > "$home/state/task-dead.meta"
+  printf 'window=fm-sess:live-window\ntmux_pane_id=%%1\nkind=ship\n' > "$home/state/task-live.meta"
+  printf 'window=fm-sess:split-window\ntmux_pane_id=%%3\nkind=ship\n' > "$home/state/task-dead.meta"
 
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
   assert_contains "$out" "endpoint: alive (backend=tmux window=fm-sess:live-window)" "live tmux endpoint not reported alive"
-  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:dead-window)" "dead tmux endpoint not reported dead"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:split-window)" \
+    "a missing recorded pane with an active monitor was not reported dead"
 
-  pass "tmux endpoint liveness is reported per task: alive for a live window, dead for a gone one"
+  pass "tmux endpoint liveness follows recorded panes despite an active monitor"
 }
 
 test_endpoint_liveness_herdr() {

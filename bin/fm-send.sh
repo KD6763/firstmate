@@ -1018,7 +1018,7 @@ else
     CURRENT_INBOX_BACKEND=
     CURRENT_INBOX_SPAWN_GEN=
     if [ -f "$TARGET_META" ]; then
-      CURRENT_INBOX_TARGET=$(fm_backend_io_target_of_meta "$TARGET_META")
+      CURRENT_INBOX_TARGET=$(fm_backend_io_target_of_meta "$TARGET_META") || CURRENT_INBOX_TARGET=
       CURRENT_INBOX_BACKEND=$(fm_backend_of_meta "$TARGET_META")
       CURRENT_INBOX_SPAWN_GEN=$(fm_meta_get "$TARGET_META" spawn_gen)
     fi
