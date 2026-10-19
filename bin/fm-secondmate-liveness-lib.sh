@@ -213,7 +213,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
     return 0
   fi
 
-  local backend target target_rc=0
+  local backend target target_rc=0 lifecycle_target
   backend=$(fm_backend_of_meta "$meta")
   target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
   if [ "$target_rc" -eq 0 ]; then
@@ -241,6 +241,12 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
         FM_SM_LIVE_KILL=1
         FM_SM_LIVE_CAUSE="confirmed agent absence on existing endpoint"
       else
+        if [ "$backend" = tmux ]; then
+          lifecycle_target=$(fm_backend_target_of_meta "$meta")
+          if [ -n "$lifecycle_target" ] && fm_backend_target_exists "$backend" "$lifecycle_target"; then
+            FM_SM_LIVE_KILL=1
+          fi
+        fi
         FM_SM_LIVE_CAUSE="recorded endpoint confidently missing"
       fi
       FM_SM_LIVE_WHERE="backend=$backend"

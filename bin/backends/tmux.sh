@@ -144,10 +144,20 @@ fm_backend_tmux_send_literal() {  # <target> <text>
 # same classification.
 fm_backend_tmux_window_inventory() {  # <session-target>
   local windows
-  if windows=$(LC_ALL=C tmux list-windows -t "$1" -F '#{window_name}' 2>&1); then
-    printf '%s\n' "$windows"
-    return 0
-  fi
+  case "$1" in
+    -a)
+      if windows=$(LC_ALL=C tmux list-windows -a -F '#{window_name}' 2>&1); then
+        printf '%s\n' "$windows"
+        return 0
+      fi
+      ;;
+    *)
+      if windows=$(LC_ALL=C tmux list-windows -t "$1" -F '#{window_name}' 2>&1); then
+        printf '%s\n' "$windows"
+        return 0
+      fi
+      ;;
+  esac
   case "$windows" in
     *"can't find session:"*|*"no server running on "*|*"error connecting to "*" (No such file or directory)"|*"error connecting to "*" (Connection refused)")
       return 2
@@ -206,19 +216,43 @@ fm_backend_tmux_task_pane() {  # <session:window> [recorded-pane-id]
     rc=$?
     echo "error: cannot resolve exact tmux window $target; refusing task I/O" >&2
     if [ -n "$pane" ] && [ "$rc" -eq 2 ]; then
-      all_panes=$(tmux list-panes -a -F '#{pane_id}' 2>/dev/null) || return 1
+      all_panes=$(tmux list-panes -a -F '#{pane_id}' 2>/dev/null) || {
+        if fm_backend_tmux_window_inventory -a >/dev/null; then
+          return 1
+        else
+          rc=$?
+          [ "$rc" -eq 2 ] && return 2
+          return 1
+        fi
+      }
       printf '%s\n' "$all_panes" | grep -Fqx -- "$pane" && return 1
       return 2
     fi
     return "$rc"
   }
-  panes=$(tmux list-panes -t "$wid" -F '#{pane_id}' 2>/dev/null) || return 1
+  panes=$(tmux list-panes -t "$wid" -F '#{pane_id}' 2>/dev/null) || {
+    if fm_backend_tmux_window_inventory -a >/dev/null; then
+      return 1
+    else
+      rc=$?
+      [ "$rc" -eq 2 ] && return 2
+      return 1
+    fi
+  }
   if [ -n "$pane" ]; then
     printf '%s\n' "$panes" | grep -Fqx -- "$pane" || {
       echo "error: recorded agent pane $pane is absent from $target; refusing task I/O" >&2
       # A moved pane is a broken binding, not proof that the agent is gone.
       # Inspect only the recorded id, never another pane's content or process.
-      all_panes=$(tmux list-panes -a -F '#{pane_id}' 2>/dev/null) || return 1
+      all_panes=$(tmux list-panes -a -F '#{pane_id}' 2>/dev/null) || {
+        if fm_backend_tmux_window_inventory -a >/dev/null; then
+          return 1
+        else
+          rc=$?
+          [ "$rc" -eq 2 ] && return 2
+          return 1
+        fi
+      }
       printf '%s\n' "$all_panes" | grep -Fqx -- "$pane" && return 1
       return 2
     }

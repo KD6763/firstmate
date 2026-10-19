@@ -814,7 +814,17 @@ window_file="$(dirname "$0")/.spawn-window"
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
   list-windows)
-    [ ! -s "$window_file" ] || cat "$window_file"
+    if [ -s "$window_file" ]; then
+      case "$*" in
+        *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|%s\n' "$(cat "$window_file")" ;;
+        *) cat "$window_file" ;;
+      esac
+    fi
+    exit 0
+    ;;
+  list-panes)
+    [ "${PTFAKE_FAIL_LIST_PANES:-0}" != 1 ] || exit 1
+    printf '%%1\n'
     exit 0
     ;;
   new-window)
@@ -825,6 +835,7 @@ case "${1:-}" in
       previous=$arg
     done
     printf '%s\n' "$name" > "$window_file"
+    printf '@1\n'
     exit 0
     ;;
   kill-window)
@@ -1087,6 +1098,22 @@ test_polytoken_existing_project_hook_layer_refuses() {
   pass "fm-spawn: a project's own polytoken hook layer is refused, not clobbered"
 }
 
+test_polytoken_pane_binding_failure_closes_fresh_window() {
+  local id rec out rc=0
+  id="pt-pane-bind-z10-$$"
+  rec=$(make_polytoken_spawn_case pane-bind "$id")
+  read_polytoken_spawn_record "$rec"
+  out=$(PTFAKE_FAIL_LIST_PANES=1 \
+    run_polytoken_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "an unreadable fresh pane binding should fail the spawn"
+  assert_contains "$(cat "$CASE_DIR/tmux-calls.log")" "kill-window" \
+    "a post-create pane-binding failure did not close its fresh window"
+  [ ! -s "$FAKEBIN_DIR/.spawn-window" ] \
+    || fail "a post-create pane-binding failure stranded its fresh window"
+  assert_absent "$HOME_DIR/state/$id.meta" "a pane-binding failure published a task record"
+  pass "fm-spawn: pane-binding failure closes its fresh polytoken window"
+}
+
 test_polytoken_whitespace_state_dir_refuses() {
   local id rec out rc spaced
   id="pt-wsstate-z8-$$"
@@ -1216,6 +1243,7 @@ test_polytoken_missing_axes_refuse_before_pane_creation
 test_polytoken_unlisted_model_refuses_before_pane_creation
 test_polytoken_secondmate_is_refused
 test_polytoken_existing_project_hook_layer_refuses
+test_polytoken_pane_binding_failure_closes_fresh_window
 test_polytoken_whitespace_state_dir_refuses
 test_polytoken_readiness_failure_fails_loudly_and_cleans_up
 test_polytoken_post_launch_failure_drops_its_slot_claim

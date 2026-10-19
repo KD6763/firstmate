@@ -4255,6 +4255,9 @@ else
     # Keep the named window separately for metadata and whole-window cleanup.
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
     TMUX_WINDOW_TARGET=$T
+    if [ "$HARNESS" = polytoken ]; then
+      SPAWN_FRESH_ENDPOINT_OPENED=1
+    fi
     TMUX_PANE_ID=$(fm_backend_tmux_task_pane "$SES:$WID") || exit 1
     T=$TMUX_PANE_ID
     WT_TARGET=$T
@@ -4496,7 +4499,7 @@ EOF
   # Orca and the Herdr projection own their own abort cleanup above; every other
   # endpoint a fresh polytoken spawn opened is closed by spawn_abort_cleanup when
   # the spawn ends with no record before its launch is delivered.
-  if [ "$HARNESS" = polytoken ] && [ "$BACKEND" != orca ] && [ "${HERDR_PROJECTED:-0}" -ne 1 ]; then
+  if [ "$HARNESS" = polytoken ] && [ "$BACKEND" != tmux ] && [ "$BACKEND" != orca ] && [ "${HERDR_PROJECTED:-0}" -ne 1 ]; then
     SPAWN_FRESH_ENDPOINT_OPENED=1
   fi
 fi

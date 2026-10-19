@@ -482,6 +482,15 @@ pass "real tmux: task liveness and stale triage read the recorded agent with the
 tmux kill-pane -t "$AGENT_PANE"
 fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "a removed original pane was not proven missing with its monitor alive"
+probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
+  . "$1"
+  fm_secondmate_liveness_probe "$2" pane poll
+  printf "%s|%s|%s" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_KILL"
+' _ "$ROOT/bin/fm-secondmate-liveness-lib.sh" "$PANE_HOME/state/pane.meta")
+[ "$probe" = 'relaunchable|missing|1' ] \
+  || fail "a missing agent pane did not retain its surviving window for lifecycle cleanup: $probe"
+fm_task_inbox_ring tmux "$PANE_WINDOW" "$PANE_HOME/state/pane.inbox/001.msg" fm-pane
+[ "$?" = 3 ] || fail "a proven-missing recorded pane did not return recovery-owned ring status 3"
 pane_send --key Enter && fail "stale original pane fell back to surviving monitor"
 pane_send 'after pane exit' && fail "stale original pane accepted a steer"
 [ ! -s "$SHIM_DIR/monitor.bytes" ] || fail "a refused binding typed into monitor"
@@ -514,6 +523,11 @@ rm "$SHIM_DIR/fail-global-pane-inventory"
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "a readable global inventory did not prove a missing window binding absent"
 pass "real tmux: moved, absent and unreadable missing-window bindings remain distinct"
+
+tmux kill-server
+fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
+[ "$?" = 2 ] || fail "an authoritatively absent tmux server became an unreadable pane binding"
+pass "real tmux: whole-server absence remains a proven missing endpoint"
 
 cleanup_all
 trap - EXIT

@@ -109,7 +109,9 @@ case "${1:-}" in
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  list-panes) printf '%%1\n'; exit 0 ;;
+  list-panes)
+    [ "${FM_FAKE_TMUX_UNREADABLE:-0}" != 1 ] || exit 1
+    printf '%%1\n'; exit 0 ;;
   list-windows)
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 0
     case "$*" in
@@ -288,9 +290,14 @@ test_ring_skips_dead_agent() {
   rc=0
   PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_MISSING=1 \
     inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1 || rc=$?
-  [ "$rc" = 2 ] || fail "an unresolvable pane should return 2 from the ring, got $rc"
+  [ "$rc" = 3 ] || fail "a proven-missing pane should return 3 from the ring, got $rc"
   [ ! -s "$log" ] || fail "a missing endpoint was typed into:"$'\n'"$(cat "$log")"
   [ -f "$rec" ] || fail "skipping a missing endpoint must leave the durable record in place"
+  rc=0
+  PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_UNREADABLE=1 \
+    inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1 || rc=$?
+  [ "$rc" = 2 ] || fail "an unreadable pane inventory should return 2 from the ring, got $rc"
+  [ ! -s "$log" ] || fail "an unreadable endpoint was typed into:"$'\n'"$(cat "$log")"
   rc=0
   PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_AGENT=claude \
     inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1 || rc=$?

@@ -355,7 +355,7 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # rather than skipped; skipping it would block every later ring. On both paths
 # a lost first Enter gets one confirmed retry.
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
-  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict meta inbox
+  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict meta inbox target_rc
   if [ "$backend" = tmux ]; then
     fm_backend_source tmux || return 2
     inbox=${rec%/*}
@@ -363,9 +363,21 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
     meta=${inbox%.inbox}.meta
     if [ -f "$meta" ]; then
       [ "$(fm_backend_of_meta "$meta")" = "$backend" ] || return 2
-      target=$(fm_backend_io_target_of_meta "$meta") || return 2
+      if target=$(fm_backend_io_target_of_meta "$meta"); then
+        :
+      else
+        target_rc=$?
+        [ "$target_rc" -eq 2 ] && return 3
+        return 2
+      fi
     else
-      target=$(fm_backend_tmux_task_pane "$target") || return 2
+      if target=$(fm_backend_tmux_task_pane "$target"); then
+        :
+      else
+        target_rc=$?
+        [ "$target_rc" -eq 2 ] && return 3
+        return 2
+      fi
     fi
   fi
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
