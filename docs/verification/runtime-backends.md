@@ -136,7 +136,7 @@ ok - real tmux: task doorbell, keys and guarding reads stay on the recorded pane
 ok - real tmux: re-rings and a focus change between typing and Enter preserve the agent pane
 ok - real tmux: the watcher retries an aged steer in the recorded pane with the monitor active
 ok - real tmux: Enter retries and the pending-composer guard use the bound pane despite focus changes
-ok - real tmux: liveness reads the original agent even when the active monitor is running
+ok - real tmux: task liveness and stale triage read the recorded agent with the monitor active
 ok - real tmux: ambiguous legacy, mismatched, duplicate and stale pane bindings fail closed
 ok - real tmux: lifecycle cleanup retains the whole-window target
 ok - missing windows and panes report once; ambiguous and stale bindings escalate without inspecting another pane

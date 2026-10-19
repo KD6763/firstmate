@@ -190,7 +190,7 @@ EOF
 # Return 2 only for a proven missing endpoint; ambiguous, moved and unreadable
 # bindings return 1. Neither failure permits reading or sending to another pane.
 fm_backend_tmux_task_pane() {  # <session:window> [recorded-pane-id]
-  local target=$1 pane=${2:-} session window wid panes rc present
+  local target=$1 pane=${2:-} session window wid panes rc all_panes
   case "$target" in
     *:*:*|:*|*:) return 1 ;;
     *:*) session=${target%%:*}; window=${target#*:} ;;
@@ -213,9 +213,9 @@ fm_backend_tmux_task_pane() {  # <session:window> [recorded-pane-id]
       echo "error: recorded agent pane $pane is absent from $target; refusing task I/O" >&2
       # A moved pane is a broken binding, not proof that the agent is gone.
       # Inspect only the recorded id, never another pane's content or process.
-      present=$(tmux display-message -p -t "$pane" '#{pane_id}' 2>/dev/null) || return 1
-      [ -n "$present" ] || return 2
-      return 1
+      all_panes=$(tmux list-panes -a -F '#{pane_id}' 2>/dev/null) || return 1
+      printf '%s\n' "$all_panes" | grep -Fqx -- "$pane" && return 1
+      return 2
     }
   else
     case "$panes" in

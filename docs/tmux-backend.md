@@ -44,7 +44,7 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
-Task input stays with the original agent pane when another pane is added to its window or selected.
+Task input stays with the original agent pane when another pane is added to its window or selected, closing [issue #7539](https://github.com/kunchenguid/firstmate/issues/7539).
 Relaunch preserves that pane, while cleanup still closes the task window.
 Older records without a pane binding work only while the task window has one pane; an ambiguous split or a stale binding refuses input.
 The metadata and compatibility contract is owned by `fm_backend_io_target_of_meta` in `bin/fm-backend.sh`.

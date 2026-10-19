@@ -326,7 +326,9 @@ fi
 # herdr task is read through fm_backend_capture while tmux uses the shared
 # endpoint-existence predicate.
 TASK_BACKEND=$(fm_backend_of_meta "$META")
-BACKEND_TARGET=$(fm_backend_target_of_meta "$META")
+BACKEND_TARGET=
+BACKEND_TARGET_RC=0
+BACKEND_TARGET=$(fm_backend_io_target_of_meta "$META" 2>/dev/null) || BACKEND_TARGET_RC=$?
 EXPECTED_LABEL="fm-$ID"
 pane_readable() {  # <target>
   case "$TASK_BACKEND" in
@@ -1287,6 +1289,11 @@ fi
 # both classifier-backed backends (tmux and herdr) - and every death-class
 # verdict reports unknown rather than trusting a possibly-stale status log as
 # the current state.
+if [ "$BACKEND_TARGET_RC" -eq 2 ]; then
+  emit unknown none "backend target gone: $(fm_meta_get "$META" tmux_pane_id)"
+elif [ "$BACKEND_TARGET_RC" -ne 0 ]; then
+  emit unknown none "backend target unreadable"
+fi
 [ -n "$BACKEND_TARGET" ] || emit unknown none "no backend target recorded"
 if ! pane_readable "$BACKEND_TARGET"; then
   # A failed probe is not itself evidence the pane is gone: the herdr CLI can

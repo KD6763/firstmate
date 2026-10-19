@@ -112,7 +112,7 @@ set_transport() { TRANSPORT=$1; TRANSPORT_REASON=${2:-}; }
 
 # A local home is curated in place when no live agent owns it.
 resolve_local_transport() { # <id> <resolved-home>
-  local id=$1 home=$2 meta backend target meta_home
+  local id=$1 home=$2 meta backend target meta_home target_rc=0
   if ! meta=$(meta_for "$id"); then
     set_transport direct 'no recorded endpoint for this home'
     return 0
@@ -124,10 +124,13 @@ resolve_local_transport() { # <id> <resolved-home>
     return 0
   fi
   backend=$(fm_backend_of_meta "$meta")
-  target=$(fm_backend_target_of_meta "$meta")
-  [ -n "$target" ] || target=$(fm_meta_get "$meta" window)
-  if [ -z "$target" ]; then
-    set_transport direct 'recorded endpoint has no target'
+  target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
+  if [ "$target_rc" -eq 2 ]; then
+    set_transport direct 'recorded agent endpoint is missing'
+    return 0
+  fi
+  if [ "$target_rc" -ne 0 ]; then
+    set_transport unavailable 'recorded agent endpoint is unreadable'
     return 0
   fi
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || printf 'unreadable')" in

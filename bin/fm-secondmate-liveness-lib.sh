@@ -213,11 +213,16 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
     return 0
   fi
 
-  local backend target
+  local backend target target_rc=0
   backend=$(fm_backend_of_meta "$meta")
-  target=$(fm_backend_target_of_meta "$meta")
-  [ -n "$target" ] || target="$window"
-  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
+  target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
+  if [ "$target_rc" -eq 0 ]; then
+    agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
+  elif [ "$target_rc" -eq 2 ]; then
+    agent_state=missing
+  else
+    agent_state=unreadable
+  fi
   case "$harness" in
     claude|codex|opencode|pi|pi-signed|grok|kimi|omp) ;;
     *)

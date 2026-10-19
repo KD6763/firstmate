@@ -633,7 +633,7 @@ snapshot_task_generation_is_current() {  # <captured-meta> <id>
 prefetch_task_observations() {  # <meta> <id>
   local meta=$1 id=$2 remote_host current_file endpoint_file current_pid='' current_rc=0
   local status_log status_capture report_path report_capture
-  local kind backend target endpoint_exists=null agent_alive=not_checked generation_current=1
+  local kind backend target target_rc=0 endpoint_exists=null agent_alive=not_checked generation_current=1
   remote_host=$(meta_value "$meta" remote_host)
   current_file="$SNAPSHOT_TASK_DIR/$id.json"
   endpoint_file="$SNAPSHOT_TASK_DIR/$id.endpoint"
@@ -657,8 +657,11 @@ prefetch_task_observations() {  # <meta> <id>
     current_pid=$!
     kind=$(meta_value "$meta" kind)
     backend=$(fm_backend_of_meta "$meta")
-    target=$(fm_backend_target_of_meta "$meta")
-    if [ -n "$target" ]; then
+    target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
+    if [ "$target_rc" -eq 2 ]; then
+      endpoint_exists=false
+      [ "$kind" != secondmate ] || agent_alive=unknown
+    elif [ "$target_rc" -eq 0 ] && [ -n "$target" ]; then
       if fm_backend_target_exists "$backend" "$target" "fm-$id" >/dev/null 2>&1; then
         endpoint_exists=true
       else
@@ -667,6 +670,8 @@ prefetch_task_observations() {  # <meta> <id>
       if [ "$kind" = secondmate ]; then
         agent_alive=$(fm_backend_agent_alive "$backend" "$target" 2>/dev/null || printf unknown)
       fi
+    elif [ "$kind" = secondmate ]; then
+      agent_alive=unknown
     fi
   else
     jq -n '{state:"unknown",source:"none",detail:"task generation changed during snapshot",raw:""}' \

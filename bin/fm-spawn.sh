@@ -4028,7 +4028,7 @@ herdr_projection_meta_field_exact() { # <meta> <key>
 # dead or agent-free endpoint before token inspection may allow flat fallback.
 # Exact Herdr fields are retained for the narrower version 2 reclaim path.
 herdr_projection_existing_meta_allows_flat() { # <meta>
-  local meta=$1 old_backend old_target old_session old_pane old_state target_session target_pane
+  local meta=$1 old_backend old_target old_io_target old_session old_pane old_state target_session target_pane rc
   HERDR_RECOVERY_BACKEND=""
   HERDR_RECOVERY_WORKSPACE_ID=""
   HERDR_RECOVERY_TAB_ID=""
@@ -4086,7 +4086,15 @@ herdr_projection_existing_meta_allows_flat() { # <meta>
       ;;
     esac
   fi
-  old_state=$(fm_backend_agent_alive "$old_backend" "$old_target")
+  if old_io_target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null); then
+    :
+  else
+    rc=$?
+    [ "$rc" -ne 2 ] || return 0
+    echo "error: existing $old_backend endpoint for $ID is unknown; refusing duplicate launch" >&2
+    return 1
+  fi
+  old_state=$(fm_backend_agent_alive "$old_backend" "$old_io_target")
   case "$old_state" in
   dead) return 0 ;;
   alive | unknown)

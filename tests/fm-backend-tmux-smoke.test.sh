@@ -9,6 +9,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export FM_GATE_REFUSE_BYPASS=1
 
 fail() { printf 'not ok - %s\n' "$1" >&2; cleanup_all; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
@@ -300,6 +301,11 @@ for arg in "$@"; do
   previous=$arg
 done
 printf '%s\t%s\t%s\n' "$1" "$target" "${!#}" >> "$FM_PANE_TEST_LAB/io.log"
+if [ "$1" = list-panes ] && [ -f "$FM_PANE_TEST_LAB/fail-global-pane-inventory" ]; then
+  for arg in "$@"; do
+    [ "$arg" != -a ] || exit 1
+  done
+fi
 # Change focus after literal typing, before submission and every retry.
 if [ "$1" = send-keys ] && [ -f "$FM_PANE_TEST_LAB/focus" ]; then
   "$FM_PANE_TEST_TMUX" -L "$FM_PANE_TEST_SOCKET" select-pane -t "$(cat "$FM_PANE_TEST_LAB/focus")"
@@ -404,6 +410,15 @@ tmux respawn-pane -k -t "$AGENT_PANE" "$collector_cmd"
 wait_for_capture_text "$AGENT_PANE" pending || fail "retry collector did not start"
 [ "$(fm_backend_composer_state tmux "$AGENT_PANE")" = pending ] || fail "retry fixture lacks a proven pending composer"
 : > "$SHIM_DIR/io.log"
+for peek_selector in pane "$PANE_WINDOW"; do
+  peek=$(FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PANE_HOME/state" \
+    FM_CONFIG_OVERRIDE="$PANE_HOME/config" FM_DATA_OVERRIDE="$PANE_HOME/data" \
+    bash "$ROOT/bin/fm-peek.sh" "$peek_selector" 10) || fail "metadata-routed peek failed for $peek_selector"
+  printf '%s\n' "$peek" | grep -q pending || fail "metadata-routed peek did not read the agent pane for $peek_selector"
+  printf '%s\n' "$peek" | grep -q collector-ready && fail "metadata-routed peek read the active monitor for $peek_selector"
+done
+assert_agent_only_reads_and_writes
+: > "$SHIM_DIR/io.log"
 resolved=$(fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta") || fail "could not resolve retry target"
 verdict=$(fm_backend_send_text_submit tmux "$resolved" typed-once 3 0.05 0)
 [ "$verdict" = pending ] || fail "retry fixture unexpectedly cleared: $verdict"
@@ -429,6 +444,13 @@ sed "s/^tmux_pane_id=.*/tmux_pane_id=$FOREIGN_PANE/" "$SHIM_DIR/bound.meta" > "$
 fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta" >/dev/null 2>&1
 [ "$?" = 1 ] || fail "a foreign live pane was mistaken for a missing endpoint"
 pane_send --key Enter && fail "pane belonging to another window accepted a key"
+sed 's/^tmux_pane_id=.*/tmux_pane_id=%999999/' "$SHIM_DIR/bound.meta" > "$PANE_HOME/state/pane.meta"
+touch "$SHIM_DIR/fail-global-pane-inventory"
+fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta" >/dev/null 2>&1
+[ "$?" = 1 ] || fail "an unreadable pane inventory was mistaken for proven absence"
+rm "$SHIM_DIR/fail-global-pane-inventory"
+fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta" >/dev/null 2>&1
+[ "$?" = 2 ] || fail "a readable pane inventory did not prove an absent binding"
 cp "$SHIM_DIR/bound.meta" "$PANE_HOME/state/pane.meta"
 printf 'tmux_pane_id=%s\n' "$MONITOR_PANE" >> "$PANE_HOME/state/pane.meta"
 pane_send --key Enter && fail "duplicate pane bindings accepted a key"
@@ -441,7 +463,22 @@ done
 [ "$(fm_backend_agent_state tmux "$AGENT_PANE")" = dead ] || fail "original pane did not become an idle shell"
 fm_task_inbox_ring tmux "$PANE_WINDOW" "$PANE_HOME/state/pane.inbox/001.msg" fm-pane
 [ "$?" = 3 ] || fail "a dead original agent must not ring the live monitor"
-pass "real tmux: liveness reads the original agent even when the active monitor is running"
+probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
+  . "$1"
+  fm_secondmate_liveness_probe "$2" pane poll
+  printf "%s|%s|%s" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_KILL"
+' _ "$ROOT/bin/fm-secondmate-liveness-lib.sh" "$PANE_HOME/state/pane.meta")
+[ "$probe" = 'relaunchable|dead|1' ] \
+  || fail "secondmate liveness followed the active monitor: $probe"
+: > "$SHIM_DIR/io.log"
+(
+  export FM_STATE_OVERRIDE="$PANE_HOME/state"
+  # shellcheck source=/dev/null
+  . "$ROOT/bin/fm-supervise-daemon.sh"
+  stale_window_is_busy "$PANE_WINDOW" "$PANE_HOME/state"
+) || true
+assert_agent_only_reads_and_writes
+pass "real tmux: task liveness and stale triage read the recorded agent with the monitor active"
 tmux kill-pane -t "$AGENT_PANE"
 fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "a removed original pane was not proven missing with its monitor alive"
