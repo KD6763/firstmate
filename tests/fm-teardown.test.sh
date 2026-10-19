@@ -78,6 +78,8 @@ REAL_PS_FOR_TEST=$(command -v ps)
 export REAL_PS_FOR_TEST
 REAL_LSOF_FOR_TEST=$(command -v lsof)
 export REAL_LSOF_FOR_TEST
+REAL_TMUX_FOR_TEST=$(command -v tmux)
+export REAL_TMUX_FOR_TEST
 
 # Build a fresh sandbox for one test case. Sets up:
 #   $CASE/state/        - firstmate state dir (with a fresh watcher beacon)
@@ -1828,6 +1830,111 @@ SH
   chmod +x "$case_dir/fakebin/tmux"
 }
 
+add_private_tmux_socket() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+if [ -e "$case_dir/tmux-unreadable" ]; then
+  case "\${1:-}" in
+    list-windows|list-panes) echo "error connecting to fixture: permission denied" >&2; exit 1 ;;
+  esac
+fi
+exec "$REAL_TMUX_FOR_TEST" -S "$case_dir/tmux.sock" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/tmux"
+}
+
+prepare_landed_legacy_tmux_case() {
+  local case_dir=$1
+  write_legacy_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  wt_commit "$case_dir" "landed legacy work"
+  add_fork_with_pushed_branch "$case_dir"
+  add_private_tmux_socket "$case_dir"
+}
+
+assert_legacy_endpoint_refusal() {
+  local case_dir=$1 label=$2 before=$3 rc=$4
+  expect_code 1 "$rc" "$label: teardown must refuse while agent identity is not safely dead"
+  grep -q "not confidently dead or agent-less" "$case_dir/stderr" \
+    || fail "$label: refusal did not name the endpoint authority gate"
+  [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$before" ] \
+    || fail "$label: refusal modified the task record"
+  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
+    || fail "$label: refusal closed the backlog item"
+}
+
+test_legacy_record_authority_uses_the_agent_pane() {
+  local case_dir agent_pane agent_pid monitor_pane before rc out
+
+  case_dir=$(make_case legacy-split-live)
+  prepare_landed_legacy_tmux_case "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1 \
+    "bash -c 'exec -a codex sleep 300'"
+  agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
+  agent_pid=$("$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_pid}')
+  monitor_pane=$("$case_dir/fakebin/tmux" split-window -d -P -F '#{pane_id}' -t firstmate:fm-task-x1)
+  "$case_dir/fakebin/tmux" select-pane -t "$monitor_pane"
+  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-split-live: fake agent exited before teardown"
+  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+  rc=0
+  run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  assert_legacy_endpoint_refusal "$case_dir" legacy-split-live "$before" "$rc"
+  [ "$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')" = "$monitor_pane" ] \
+    || fail "legacy-split-live: refusal did not preserve the active monitor"
+  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-split-live: refusal terminated the live agent"
+  "$case_dir/fakebin/tmux" kill-server
+
+  case_dir=$(make_case legacy-single-live)
+  prepare_landed_legacy_tmux_case "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1 \
+    "bash -c 'exec -a codex sleep 300'"
+  agent_pid=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_pid}')
+  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+  rc=0
+  run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  assert_legacy_endpoint_refusal "$case_dir" legacy-single-live "$before" "$rc"
+  grep -q "reads 'alive'" "$case_dir/stderr" \
+    || fail "legacy-single-live: the sole legacy pane was not classified as the live agent"
+  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-single-live: refusal terminated the live agent"
+  "$case_dir/fakebin/tmux" kill-server
+
+  case_dir=$(make_case legacy-single-dead)
+  prepare_landed_legacy_tmux_case "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+  out=$(run_teardown "$case_dir" --legacy-record) \
+    || fail "legacy-single-dead: teardown refused an idle sole pane"
+  printf '%s\n' "$out" | grep -Fq 'legacy record accepted without spawn_gen: endpoint dead' \
+    || fail "legacy-single-dead: completion did not report the dead agent pane"
+  assert_absent "$case_dir/state/task-x1.meta" \
+    "legacy-single-dead: teardown left the task record"
+
+  case_dir=$(make_case legacy-pane-missing)
+  prepare_landed_legacy_tmux_case "$case_dir"
+  printf '%s\n' 'tmux_pane_id=%999999999' >> "$case_dir/state/task-x1.meta"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+  out=$(run_teardown "$case_dir" --legacy-record) \
+    || fail "legacy-pane-missing: teardown refused a proven-missing recorded pane"
+  printf '%s\n' "$out" | grep -Fq 'legacy record accepted without spawn_gen: endpoint missing' \
+    || fail "legacy-pane-missing: completion did not report the missing recorded pane"
+  assert_absent "$case_dir/state/task-x1.meta" \
+    "legacy-pane-missing: teardown left the task record"
+
+  case_dir=$(make_case legacy-inventory-unreadable)
+  prepare_landed_legacy_tmux_case "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+  : > "$case_dir/tmux-unreadable"
+  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+  rc=0
+  run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  assert_legacy_endpoint_refusal "$case_dir" legacy-inventory-unreadable "$before" "$rc"
+  rm -f "$case_dir/tmux-unreadable"
+  "$case_dir/fakebin/tmux" has-session -t firstmate \
+    || fail "legacy-inventory-unreadable: refusal removed the lifecycle window"
+  "$case_dir/fakebin/tmux" kill-server
+  pass "legacy teardown authority follows the agent pane and fails closed"
+}
+
 test_legacy_record_without_the_flag_refuses() {
   local case_dir rc
   case_dir=$(make_case legacy-noflag)
@@ -2020,18 +2127,16 @@ test_windowless_leftover_retries_its_retained_legacy_stamp_without_the_flag() {
   pass "a windowless leftover retries its retained legacy stamp without --legacy-record"
 }
 
-test_legacy_record_teardown_completes_when_landed_and_endpoint_dead() {
+test_legacy_record_teardown_completes_when_landed_and_endpoint_missing() {
   local case_dir out
   case_dir=$(make_case legacy-allow)
   write_legacy_meta "$case_dir" no-mistakes ship
+  printf '%s\n' 'tmux_pane_id=%999999999' >> "$case_dir/state/task-x1.meta"
   seed_backlog_in_flight "$case_dir"
   wt_commit "$case_dir" "landed legacy work"
   add_fork_with_pushed_branch "$case_dir"
-  # The default fakebin tmux answers every query with success and no output, so
-  # the classifier reads the recorded window as authoritatively missing.
-
   out=$(run_teardown "$case_dir" --legacy-record) \
-    || fail "legacy-allow: teardown refused a landed legacy record with a dead endpoint"
+    || fail "legacy-allow: teardown refused a landed legacy record with a missing endpoint"
   [ "$(backlog_row_state "$case_dir")" = "done" ] \
     || fail "legacy-allow: teardown returned success with its backlog item still open"
   printf '%s\n' "$out" | grep -Fq 'legacy record accepted without spawn_gen: endpoint missing, incarnation legacy-' \
@@ -2040,7 +2145,7 @@ test_legacy_record_teardown_completes_when_landed_and_endpoint_dead() {
     "legacy-allow: a landed legacy close left its pending-close record behind"
   assert_absent "$case_dir/state/task-x1.meta" \
     "legacy-allow: teardown left the task record behind"
-  pass "a landed legacy record with a dead endpoint tears down and logs its accepted incarnation"
+  pass "a landed legacy record with a missing endpoint tears down and logs its accepted incarnation"
 }
 
 test_legacy_record_teardown_refuses_unlanded_work() {
@@ -2098,7 +2203,7 @@ test_legacy_record_rolls_the_stamp_back_when_the_marker_write_fails() {
   local case_dir rc before
   case_dir=$(make_case legacy-stamp-rollback)
   write_legacy_meta "$case_dir" no-mistakes ship
-  printf '%s\n' 'pr=not-a-valid-url' >> "$case_dir/state/task-x1.meta"
+  printf '%s\n' 'tmux_pane_id=%999999999' 'pr=not-a-valid-url' >> "$case_dir/state/task-x1.meta"
   seed_backlog_in_flight "$case_dir"
   wt_commit "$case_dir" "landed legacy work"
   add_fork_with_pushed_branch "$case_dir"
@@ -2151,7 +2256,7 @@ test_retained_legacy_stamp_still_faces_the_endpoint_gate() {
   local case_dir rc stamped
   case_dir=$(make_case legacy-stamp-retained)
   write_legacy_meta "$case_dir" no-mistakes ship
-  printf '%s\n' 'pr=not-a-valid-url' >> "$case_dir/state/task-x1.meta"
+  printf '%s\n' 'tmux_pane_id=%999999999' 'pr=not-a-valid-url' >> "$case_dir/state/task-x1.meta"
   seed_backlog_in_flight "$case_dir"
   wt_commit "$case_dir" "landed legacy work"
   add_fork_with_pushed_branch "$case_dir"
@@ -5253,7 +5358,8 @@ test_windowless_legacy_record_tears_down_with_the_legacy_flag
 test_windowless_legacy_record_still_refuses_unlanded_work
 test_windowless_record_outside_the_leftover_class_still_refuses
 test_windowless_leftover_retries_its_retained_legacy_stamp_without_the_flag
-test_legacy_record_teardown_completes_when_landed_and_endpoint_dead
+test_legacy_record_teardown_completes_when_landed_and_endpoint_missing
+test_legacy_record_authority_uses_the_agent_pane
 test_legacy_record_teardown_refuses_unlanded_work
 test_legacy_record_teardown_refuses_an_ambiguous_endpoint
 test_legacy_record_rolls_the_stamp_back_when_the_marker_write_fails

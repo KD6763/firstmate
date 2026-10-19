@@ -1198,9 +1198,9 @@ BASE_BRANCH=$(grep '^base_branch=' "$META" | cut -d= -f2- || true)
 # --legacy-record given or the record is windowless) may be torn down only
 # when its recorded endpoint is confidently gone or agent-less. Windowless
 # leftovers name no endpoint and are treated as missing. For a recorded
-# window, only the recovery-grade classifier's dead and missing license
-# that, and every ambiguous, unreadable, or unverified endpoint state refuses
-# while the record is still intact. Acceptance resolves the incarnation token
+# window, only a resolved agent pane classified dead or a resolver-proven
+# missing endpoint licenses that, and every ambiguous, moved, unreadable, or
+# unverified binding refuses while the record is still intact. Acceptance resolves the incarnation token
 # here; the record itself is stamped only once every landed-work refusal has
 # passed, immediately before the close marker binds to it, so any refusal
 # leaves the record byte-identical.
@@ -1208,7 +1208,14 @@ if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
   if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
     TEARDOWN_LEGACY_ENDPOINT=missing
   else
-    TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$T")
+    TEARDOWN_LEGACY_IO_STATUS=0
+    TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_io_target_of_meta "$META") \
+      || TEARDOWN_LEGACY_IO_STATUS=$?
+    case "$TEARDOWN_LEGACY_IO_STATUS" in
+      0) TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$TEARDOWN_LEGACY_IO_TARGET") ;;
+      2) TEARDOWN_LEGACY_ENDPOINT=missing ;;
+      *) TEARDOWN_LEGACY_ENDPOINT=unreadable ;;
+    esac
     case "$TEARDOWN_LEGACY_ENDPOINT" in
       dead|missing) ;;
       *)
