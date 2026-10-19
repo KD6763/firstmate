@@ -1576,13 +1576,20 @@ spawn_abort_cleanup() {
     SPAWN_META_LOCK_HELD=0
     fm_lock_release "$SPAWN_META_LOCK" || true
   fi
-  # A fresh polytoken spawn that fails and leaves no record must leave the pool
-  # as it found it. Before its launch is delivered, the endpoint it opened holds nothing but
-  # the shell whose `treehouse get` leases the slot, so closing it returns the
-  # slot to the pool and leaves no window or tab for a retry to trip over; the
-  # Firstmate wiring, task temp root, and staged launch file it wrote go with it.
-  # Once a launch was delivered into an endpoint still open, a worker may be
-  # running there, so those stay for the operator, as the refusal says.
+  if [ "$status" -ne 0 ] && [ "${BACKEND:-}" = tmux ] &&
+    [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] && [ "$SPAWN_LAUNCH_SENT" = 0 ] &&
+    [ "$RELAUNCH" -eq 0 ] && [ -n "${T:-}" ]; then
+    SPAWN_FRESH_ENDPOINT_OPENED=0
+    if fm_backend_kill tmux "${TMUX_WINDOW_TARGET:-$T}" 2>/dev/null; then
+      SPAWN_ENDPOINT_CLOSED=1
+    else
+      echo "warning: could not close tmux endpoint $T after the failed spawn of $ID; close it by hand before retrying" >&2
+    fi
+  fi
+  # A fresh polytoken spawn that fails and leaves no record must leave its
+  # harness-owned wiring as it found it. Once a launch was delivered into an
+  # endpoint still open, a worker may be running there, so those stay for the
+  # operator, as the refusal says.
   if [ "$status" -ne 0 ] && [ "${HARNESS:-}" = polytoken ] &&
     { [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] || [ "$SPAWN_FRESH_WIRING_PENDING" = 1 ] ||
       [ "$SPAWN_TASK_TMP_CREATED" = 1 ] || [ -n "$SPAWN_STAGED_LAUNCH_FILE" ]; } &&
@@ -3880,9 +3887,7 @@ spawn_worktree_isolated() { # <path>
   return 0
 }
 
-# spawn_endpoint_hint: the operator pointer for a pre-launch refusal. Only a
-# fresh polytoken spawn closes its endpoint on abort, so only it points away
-# from the window; every other harness keeps the plain inspect pointer.
+# spawn_endpoint_hint: the operator pointer for a pre-launch refusal.
 spawn_endpoint_closes_on_abort() {
   [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] && [ "$SPAWN_LAUNCH_SENT" = 0 ]
 }
@@ -4255,9 +4260,7 @@ else
     # Keep the named window separately for metadata and whole-window cleanup.
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
     TMUX_WINDOW_TARGET=$T
-    if [ "$HARNESS" = polytoken ]; then
-      SPAWN_FRESH_ENDPOINT_OPENED=1
-    fi
+    SPAWN_FRESH_ENDPOINT_OPENED=1
     TMUX_PANE_ID=$(fm_backend_tmux_task_pane "$SES:$WID") || exit 1
     T=$TMUX_PANE_ID
     WT_TARGET=$T
@@ -4496,9 +4499,7 @@ EOF
     T="$ORCA_TERMINAL"
     ;;
   esac
-  # Orca and the Herdr projection own their own abort cleanup above; every other
-  # endpoint a fresh polytoken spawn opened is closed by spawn_abort_cleanup when
-  # the spawn ends with no record before its launch is delivered.
+  # Orca and the Herdr projection own their own abort cleanup above.
   if [ "$HARNESS" = polytoken ] && [ "$BACKEND" != tmux ] && [ "$BACKEND" != orca ] && [ "${HERDR_PROJECTED:-0}" -ne 1 ]; then
     SPAWN_FRESH_ENDPOINT_OPENED=1
   fi
