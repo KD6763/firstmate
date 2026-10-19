@@ -215,20 +215,29 @@ fm_backend_tmux_task_pane() {  # <session:window> [recorded-pane-id]
   wid=$(fm_backend_tmux_window_id "${session#=}" "${window#=}") || {
     rc=$?
     echo "error: cannot resolve exact tmux window $target; refusing task I/O" >&2
-    if [ -n "$pane" ] && [ "$rc" -eq 2 ]; then
-      all_panes=$(tmux list-panes -a -F '#{pane_id}' 2>/dev/null) || {
-        if fm_backend_tmux_window_inventory -a >/dev/null; then
-          return 1
-        else
-          rc=$?
-          [ "$rc" -eq 2 ] && return 2
-          return 1
-        fi
-      }
-      printf '%s\n' "$all_panes" | grep -Fqx -- "$pane" && return 1
-      return 2
+    if [ "$rc" -eq 2 ]; then
+      if [ -n "$pane" ]; then
+        all_panes=$(tmux list-panes -a -F '#{pane_id}' 2>/dev/null) || {
+          if fm_backend_tmux_window_inventory -a >/dev/null; then
+            return 1
+          else
+            rc=$?
+            [ "$rc" -eq 2 ] && return 2
+            return 1
+          fi
+        }
+        printf '%s\n' "$all_panes" | grep -Fqx -- "$pane" && return 1
+        return 2
+      fi
+      if fm_backend_tmux_window_inventory -a >/dev/null; then
+        return 1
+      else
+        rc=$?
+        [ "$rc" -eq 2 ] && return 2
+        return 1
+      fi
     fi
-    return "$rc"
+    return 1
   }
   panes=$(tmux list-panes -t "$wid" -F '#{pane_id}' 2>/dev/null) || {
     if fm_backend_tmux_window_inventory -a >/dev/null; then

@@ -306,6 +306,11 @@ if [ "$1" = list-panes ] && [ -f "$FM_PANE_TEST_LAB/fail-global-pane-inventory" 
     [ "$arg" != -a ] || exit 1
   done
 fi
+if [ "$1" = list-windows ] && [ -f "$FM_PANE_TEST_LAB/fail-global-window-inventory" ]; then
+  for arg in "$@"; do
+    [ "$arg" != -a ] || exit 1
+  done
+fi
 # Change focus after literal typing, before submission and every retry.
 if [ "$1" = send-keys ] && [ -f "$FM_PANE_TEST_LAB/focus" ]; then
   "$FM_PANE_TEST_TMUX" -L "$FM_PANE_TEST_SOCKET" select-pane -t "$(cat "$FM_PANE_TEST_LAB/focus")"
@@ -482,6 +487,13 @@ pass "real tmux: task liveness and stale triage read the recorded agent with the
 tmux kill-pane -t "$AGENT_PANE"
 fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "a removed original pane was not proven missing with its monitor alive"
+snapshot=$(FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PANE_HOME/state" \
+  FM_CONFIG_OVERRIDE="$PANE_HOME/config" FM_DATA_OVERRIDE="$PANE_HOME/data" \
+  bash "$ROOT/bin/fm-fleet-snapshot.sh" --json) || fail "fleet snapshot failed for a removed bound pane"
+printf '%s' "$snapshot" | jq -e --arg pane "$AGENT_PANE" '
+  .tasks[] | select(.id == "pane")
+  | .endpoint.target == $pane and .endpoint.exists == false
+' >/dev/null || fail "fleet snapshot mixed pane existence with its lifecycle window: $snapshot"
 probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
   . "$1"
   fm_secondmate_liveness_probe "$2" pane poll
@@ -510,11 +522,14 @@ MOVED_PANE=$(tmux new-window -dP -F '#{pane_id}' -t "$SESSION:" -n fm-moved 'sle
   || fail "real tmux: could not start moved-pane fixture"
 printf 'window=%s\ntmux_pane_id=%s\nharness=codex\nkind=scout\n' \
   "$MOVED_WINDOW" "$MOVED_PANE" > "$PANE_HOME/state/moved.meta"
+sed '/^tmux_pane_id=/d' "$PANE_HOME/state/moved.meta" > "$PANE_HOME/state/moved-legacy.meta"
 tmux join-pane -d -s "$MOVED_PANE" -t "$FOREIGN_PANE" \
   || fail "real tmux: could not move the recorded pane"
 fm_backend_target_exists tmux "$MOVED_WINDOW" && fail "moved pane left its original window alive"
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 [ "$?" = 1 ] || fail "a moved live pane was mistaken for a missing endpoint"
+fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta" >/dev/null 2>&1
+[ "$?" = 1 ] || fail "a moved legacy pane was mistaken for a missing endpoint"
 tmux kill-pane -t "$MOVED_PANE"
 touch "$SHIM_DIR/fail-global-pane-inventory"
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
@@ -522,11 +537,19 @@ fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 rm "$SHIM_DIR/fail-global-pane-inventory"
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "a readable global inventory did not prove a missing window binding absent"
+fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta" >/dev/null 2>&1
+[ "$?" = 1 ] || fail "a missing legacy window authorized recovery without agent identity"
+touch "$SHIM_DIR/fail-global-window-inventory"
+fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta" >/dev/null 2>&1
+[ "$?" = 1 ] || fail "an unreadable server inventory proved a legacy binding absent"
+rm "$SHIM_DIR/fail-global-window-inventory"
 pass "real tmux: moved, absent and unreadable missing-window bindings remain distinct"
 
 tmux kill-server
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "an authoritatively absent tmux server became an unreadable pane binding"
+fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta" >/dev/null 2>&1
+[ "$?" = 2 ] || fail "an authoritatively absent tmux server became an unproven legacy binding"
 pass "real tmux: whole-server absence remains a proven missing endpoint"
 
 cleanup_all

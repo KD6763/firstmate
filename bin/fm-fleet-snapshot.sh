@@ -633,7 +633,7 @@ snapshot_task_generation_is_current() {  # <captured-meta> <id>
 prefetch_task_observations() {  # <meta> <id>
   local meta=$1 id=$2 remote_host current_file endpoint_file current_pid='' current_rc=0
   local status_log status_capture report_path report_capture
-  local kind backend target target_rc=0 endpoint_exists=null agent_alive=not_checked generation_current=1
+  local kind backend target endpoint_target='' target_rc=0 endpoint_exists=null agent_alive=not_checked generation_current=1
   remote_host=$(meta_value "$meta" remote_host)
   current_file="$SNAPSHOT_TASK_DIR/$id.json"
   endpoint_file="$SNAPSHOT_TASK_DIR/$id.endpoint"
@@ -649,6 +649,7 @@ prefetch_task_observations() {  # <meta> <id>
   fi
 
   if [ -n "$remote_host" ]; then
+    endpoint_target=$(meta_value "$meta" remote_target)
     jq -n '{state:"unknown",source:"none",detail:"remote endpoint liveness not collected by fleet snapshot",raw:""}' \
       > "$current_file" || current_rc=1
     agent_alive=unknown
@@ -657,11 +658,16 @@ prefetch_task_observations() {  # <meta> <id>
     current_pid=$!
     kind=$(meta_value "$meta" kind)
     backend=$(fm_backend_of_meta "$meta")
+    endpoint_target=$(fm_backend_target_of_meta "$meta")
+    if [ "$backend" = tmux ] && grep -q '^tmux_pane_id=' "$meta"; then
+      endpoint_target=$(fm_backend_meta_exact_value "$meta" tmux_pane_id) || endpoint_target=''
+    fi
     target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
     if [ "$target_rc" -eq 2 ]; then
       endpoint_exists=false
       [ "$kind" != secondmate ] || agent_alive=unknown
     elif [ "$target_rc" -eq 0 ] && [ -n "$target" ]; then
+      endpoint_target=$target
       if fm_backend_target_exists "$backend" "$target" "fm-$id" >/dev/null 2>&1; then
         endpoint_exists=true
       else
@@ -689,7 +695,8 @@ prefetch_task_observations() {  # <meta> <id>
     endpoint_exists=null
     agent_alive=unknown
   fi
-  printf 'endpoint_exists=%s\nagent_alive=%s\n' "$endpoint_exists" "$agent_alive" > "$endpoint_file" || current_rc=1
+  printf 'endpoint_target=%s\nendpoint_exists=%s\nagent_alive=%s\n' \
+    "$endpoint_target" "$endpoint_exists" "$agent_alive" > "$endpoint_file" || current_rc=1
   return "$current_rc"
 }
 
@@ -750,7 +757,7 @@ prefetch_task_current_states() {
 task_json_lines() {
   local meta original_meta id kind harness mode yolo project worktree home projects spawn_gen backend target status_log report_path
   local remote_host remote_root current_file endpoint_file observation_line index=0
-  local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
+  local pr pr_source event_json current_json endpoint_target endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
   local last_event_raw current_state current_source pending_decision blocked_event report_present=0 pr_from_status
   local open_decisions_tsv open_decisions_json
 
@@ -837,9 +844,11 @@ task_json_lines() {
 
     endpoint_exists=null
     agent_alive=not_checked
+    endpoint_target=$target
     endpoint_file="$SNAPSHOT_TASK_DIR/$id.endpoint"
     while IFS= read -r observation_line || [ -n "$observation_line" ]; do
       case "$observation_line" in
+        endpoint_target=*) endpoint_target=${observation_line#*=} ;;
         endpoint_exists=*) endpoint_exists=${observation_line#*=} ;;
         agent_alive=*) agent_alive=${observation_line#*=} ;;
       esac
@@ -873,7 +882,7 @@ task_json_lines() {
       --arg projects "$projects" \
       --arg spawn_gen "$spawn_gen" \
       --arg backend "$backend" \
-      --arg target "$target" \
+      --arg target "$endpoint_target" \
       --arg remote_host "$remote_host" \
       --arg remote_root "$remote_root" \
       --arg pr "$pr" \
