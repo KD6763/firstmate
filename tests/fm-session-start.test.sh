@@ -701,6 +701,7 @@ EOF
   touch "$home/state/.last-watcher-beat"
   {
     printf 'window=firstmate:fm-%s\n' "$id"
+    printf 'tmux_pane_id=%%1\n'
     printf 'kind=secondmate\n'
     printf 'harness=pi\n'
     printf 'home=%s\n' "$mate"

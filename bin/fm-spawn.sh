@@ -1576,6 +1576,9 @@ spawn_abort_cleanup() {
     SPAWN_META_LOCK_HELD=0
     fm_lock_release "$SPAWN_META_LOCK" || true
   fi
+  # Every fresh tmux window remains abort-owned until a launch is sent, for
+  # every harness. A pre-launch failure closes its lifecycle window; once any
+  # launch is sent, this path deliberately leaves the endpoint untouched.
   if [ "$status" -ne 0 ] && [ "${BACKEND:-}" = tmux ] &&
     [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] && [ "$SPAWN_LAUNCH_SENT" = 0 ] &&
     [ "$RELAUNCH" -eq 0 ] && [ -n "${T:-}" ]; then

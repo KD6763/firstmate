@@ -64,7 +64,11 @@ make_case() {
 set -u
 [ -z "${FM_FAKE_TMUX_LOG:-}" ] || printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
 if [ "${1:-}" = "list-panes" ]; then
-  printf '%s\n' "${FM_FAKE_TMUX_PANES-%1}"; exit 0
+  case " $* " in
+    *' -a '*) printf '%s\n' "${FM_FAKE_TMUX_ALL_PANES-${FM_FAKE_TMUX_PANES-%1}}" ;;
+    *) printf '%s\n' "${FM_FAKE_TMUX_PANES-%1}" ;;
+  esac
+  exit 0
 fi
 if [ "${1:-}" = "list-windows" ]; then
   case "$*" in

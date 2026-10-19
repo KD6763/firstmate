@@ -111,6 +111,7 @@ case "${1:-}" in
     exit 0 ;;
   list-panes)
     [ "${FM_FAKE_TMUX_UNREADABLE:-0}" != 1 ] || exit 1
+    [ "${FM_FAKE_TMUX_MISSING:-0}" != 1 ] || exit 0
     printf '%%1\n'; exit 0 ;;
   list-windows)
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 0
@@ -280,6 +281,7 @@ test_ring_skips_dead_agent() {
   mkdir -p "$state"
   make_watch_stubs "$dir" >/dev/null
   rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  printf 'window=sess:fm-t1\ntmux_pane_id=%%1\nharness=claude\nkind=ship\n' > "$state/t1.meta"
   log="$dir/send.log"; : > "$log"
   rc=0
   PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_AGENT=zsh \

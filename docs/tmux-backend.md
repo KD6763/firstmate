@@ -52,10 +52,10 @@ Destructive and launch authority refuses an unbound record, while an ambiguous s
 ### Agent liveness probe
 
 A target-existence check proves only that the pane exists.
-The deeper tmux agent-liveness probe first verifies the requested pane or exact window membership, then reads process names to distinguish a running harness from a bare idle shell.
-It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, Rovo, and AGY process identities as `alive`, common shells as `dead`, an authoritatively absent pane or window as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.
+Task endpoint resolution first verifies the bound pane or exact window membership, then the deeper tmux agent-liveness probe reads process names to distinguish a running harness from a bare idle shell.
+Together they classify recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, Rovo, and AGY process identities as `alive`, common shells as `dead`, an absent bound pane or window as `missing` only when readable inventory proves that absence, unreadable or unproven state as `unreadable`, and every other process as `ambiguous`.
 The process-name vocabulary behind those verdicts is owned by `bin/fm-agent-process-lib.sh` and shared with the Herdr adapter, which proves a registered agent against the same names ([herdr-backend.md](herdr-backend.md) "Restart and liveness behavior").
-Only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.
+Authority-bearing paths require a durable pane binding first, then only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.
 
 For positive attribution, the probe combines two independent name sources rather than making either one load-bearing.
 `#{pane_current_command}` and the pane tty foreground process group's kernel `comm` values expose different name fields, and which one retains executable identity is platform-dependent.
