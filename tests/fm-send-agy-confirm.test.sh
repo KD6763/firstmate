@@ -52,7 +52,9 @@ set -u
 cnt_file="$dir/plain.count"
 case "\${1:-}" in
   send-keys) exit 0 ;;
+  list-panes) printf '%%1\n'; exit 0 ;;
   display-message)
+    case "\$*" in *'#{pane_id}'*) printf '%%1\n'; exit 0 ;; esac
     for a in "\$@"; do
       case "\$a" in
         *cursor_y*) printf '0\n'; exit 0 ;;
@@ -75,7 +77,11 @@ case "\${1:-}" in
       printf '> \n? for shortcuts\n'
     fi
     exit 0 ;;
-  list-windows) printf 'win\n'; exit 0 ;;
+  list-windows)
+    case "\$*" in
+      *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|win\n'; exit 0 ;;
+    esac
+    printf 'win\n'; exit 0 ;;
 esac
 exit 0
 SH

@@ -38,11 +38,17 @@ make_stubs() {  # <dir> -> echoes fakebin dir
 set -u
 case "${1:-}" in
   send-keys) exit 0 ;;
+  list-panes) printf '%%1\n'; exit 0 ;;
   display-message)
+    case "$*" in *'#{pane_id}'*) printf '%%1\n'; exit 0 ;; esac
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
-  list-windows) printf 'win\n'; exit 0 ;;
+  list-windows)
+    case "$*" in
+      *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|win\n'; exit 0 ;;
+    esac
+    printf 'win\n'; exit 0 ;;
 esac
 exit 0
 SH

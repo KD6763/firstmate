@@ -32,10 +32,9 @@
 #
 # Compatibility contract: a task's meta may omit `backend=`; every reader here
 # treats that as `tmux` (fm_backend_of_meta), and fm-spawn.sh does not write
-# `backend=tmux` for a default-backend task, so existing and newly spawned
-# default-path metas stay byte-identical. Only a task spawned on a non-tmux
+# `backend=tmux` for a default-backend task. Only a task spawned on a non-tmux
 # spawn-capable backend, currently herdr, zellij, orca, or cmux, carries an
-# explicit `backend=` line.
+# explicit `backend=` line. Pane identity is independent of that default.
 #
 # Event-source framing (herdr-addendum "Events as the core abstraction"): a
 # backend's supervision surface is conceptually an EVENT SOURCE - it produces
@@ -360,6 +359,30 @@ fm_backend_target_of_meta() {  # <meta-file>
   fi
   window=$(fm_meta_get "$meta" window)
   [ -n "$window" ] && printf '%s' "$window"
+}
+
+# Resolve task I/O separately from its lifecycle window. For tmux, the recorded
+# tmux_pane_id must still belong to that exact window. Legacy metadata may use
+# its sole pane; a split window without a binding is ambiguous and refuses.
+# Other backends already record a pane/surface/terminal and remain unchanged.
+# A failed read is never permission to fall back to the active pane.
+# For tmux, status 2 proves the recorded endpoint is missing; status 1 leaves
+# membership unproven. Other backends retain their existing resolution status.
+fm_backend_io_target_of_meta() {  # <meta-file>
+  local meta=$1 window pane=
+  if [ "$(fm_backend_of_meta "$meta")" != tmux ]; then
+    fm_backend_target_of_meta "$meta"
+    return
+  fi
+  window=$(fm_backend_meta_exact_value "$meta" window) || return 1
+  if grep -q '^tmux_pane_id=' "$meta"; then
+    pane=$(fm_backend_meta_exact_value "$meta" tmux_pane_id) || {
+      echo "error: malformed tmux_pane_id in $meta; refusing task I/O" >&2
+      return 1
+    }
+  fi
+  fm_backend_source tmux || return 1
+  fm_backend_tmux_task_pane "$window" "$pane"
 }
 
 # fm_backend_validate_task_endpoint: validate a task cleanup record entirely

@@ -112,12 +112,20 @@ case "$*" in
 esac
 window_file="$(dirname "$0")/.spawn-window"
 case "${1:-}" in
-  display-message) printf 'firstmate\n'; exit 0 ;;
+  display-message)
+    case "$*" in *'#{pane_id}'*) printf '%%1\n' ;; *) printf 'firstmate\n' ;; esac
+    exit 0 ;;
+  list-panes) [ ! -s "$window_file" ] || printf '%%1\n'; exit 0 ;;
   list-windows)
     if [ -n "${FM_FAKE_DUPLICATE_WINDOW:-}" ]; then
       printf '%s\n' "$FM_FAKE_DUPLICATE_WINDOW"
     fi
-    [ ! -s "$window_file" ] || cat "$window_file"
+    if [ -s "$window_file" ]; then
+      case "$*" in
+        *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|%s\n' "$(cat "$window_file")" ;;
+        *) cat "$window_file" ;;
+      esac
+    fi
     exit 0
     ;;
   new-window)
@@ -128,6 +136,7 @@ case "${1:-}" in
       previous=$arg
     done
     printf '%s\n' "$name" > "$window_file"
+    printf '@1\n'
     exit 0
     ;;
   kill-window)

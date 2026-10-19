@@ -1592,7 +1592,7 @@ spawn_abort_cleanup() {
       SPAWN_FRESH_ENDPOINT_OPENED=0
       local abort_tab_id=
       [ "$BACKEND" != zellij ] || abort_tab_id=${ZELLIJ_TAB_ID:-}
-      if fm_backend_kill "$BACKEND" "$T" "$abort_tab_id" "fm-$ID" 2>/dev/null; then
+      if fm_backend_kill "$BACKEND" "${TMUX_WINDOW_TARGET:-$T}" "$abort_tab_id" "fm-$ID" 2>/dev/null; then
         SPAWN_ENDPOINT_CLOSED=1
       else
         echo "warning: could not close endpoint $T after the failed spawn of $ID; close it by hand so its slot returns to the pool" >&2
@@ -2004,7 +2004,7 @@ fi
 # non-spawn-capable backends. The resolved value is
 # recorded in meta only when it is NOT tmux (fm-teardown.sh and fm-watch.sh's
 # window_backend/fm_backend_of_meta already treat an absent backend= as tmux),
-# so the default path's meta stays byte-identical.
+# preserving the optional backend field on the default path.
 if [ "$RELAUNCH" -eq 0 ]; then
   if [ "$BACKEND_SET" -eq 1 ]; then
     BACKEND=$BACKEND_ARG
@@ -2057,6 +2057,8 @@ PROJ=
 ARG3=
 FIRSTMATE_HOME=
 RAW_LAUNCH=0
+TMUX_WINDOW_TARGET=
+TMUX_PANE_ID=
 
 # --relaunch adoption: every identity axis comes from the task's own validated
 # durable record, never from the command line, so a relaunch can only ever
@@ -2091,6 +2093,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fm_backend_validate_task_endpoint "$RELAUNCH_META" "$ID" || exit 1
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
+  RELAUNCH_IO_TARGET=$(fm_backend_io_target_of_meta "$RELAUNCH_META") || exit 1
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
   # A relaunch must PROVE the previous agent is gone before it launches another
@@ -2129,7 +2132,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # owns that vocabulary). The proof itself lives in one place for the whole
   # control plane - fm_control_endpoint_absence_verdict - so `exit` and
   # `relaunch` cannot reach two different answers about one endpoint.
-  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
+  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_IO_TARGET")
   if [ "$RELAUNCH_STATE" = missing ]; then
     RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET")
     case "${RELAUNCH_ABSENCE%%$'\t'*}" in
@@ -4152,9 +4155,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # relaunch a REPLACEMENT rather than a second copy of the task: no new
     # terminal, no second worktree, and every uncommitted change left exactly
     # where the previous agent left it.
-    T=$RELAUNCH_TARGET
+    T=$RELAUNCH_IO_TARGET
     WT_TARGET=$T
-    SES=${T%%:*}
+    SES=${RELAUNCH_TARGET%%:*}
+    if [ "$BACKEND" = tmux ]; then
+      TMUX_WINDOW_TARGET=$RELAUNCH_TARGET
+      TMUX_PANE_ID=$T
+    fi
   else
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh endpoint for the same task, opened directly in the
@@ -4235,11 +4242,14 @@ else
     # #134 robustness (tmux): fm_backend_tmux_create_task captures a stable window
     # id and pins the window name (automatic-rename/allow-rename off) so a captain's
     # non-default tmux config cannot rename the window away from fm-<id> once
-    # treehouse cd's into the worktree. WT_TARGET carries that stable id for the
-    # rename-critical worktree-detection steps below; the persisted window= handle
-    # stays $T (the name form), which is safe now that rename is disabled.
+    # treehouse cd's into the worktree. Bind its sole initial pane before sending
+    # anything; later splits must never change the launch or task I/O target.
+    # Keep the named window separately for metadata and whole-window cleanup.
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
-    WT_TARGET="$WID"
+    TMUX_WINDOW_TARGET=$T
+    TMUX_PANE_ID=$(fm_backend_tmux_task_pane "$SES:$WID") || exit 1
+    T=$TMUX_PANE_ID
+    WT_TARGET=$T
     ;;
   herdr)
     # fm_backend_herdr_workspace_label resolves the target workspace from
@@ -4487,11 +4497,9 @@ if [ "$KIND" = secondmate ]; then
     propagate_inheritable_config "$CONFIG" "$PROJ_ABS/config" ||
     echo "warning: secondmate $ID trace-context inheritance failed for $PROJ_ABS" >&2
 fi
-# #134 robustness: only tmux needs a worktree-detection target distinct from $T -
-# its rename-safe stable window id, set as WT_TARGET=$WID in the tmux branch above.
-# Every other backend addresses its pane/surface by the id already in $T, so default
-# WT_TARGET to $T for them (and for any future backend) - the shared treehouse-get +
-# worktree-detection steps below must never reference an unbound WT_TARGET under set -u.
+# Each backend addresses worktree discovery through the same pane/surface as
+# launch I/O. Default WT_TARGET to $T for branches that have not set it, so the
+# shared worktree-discovery steps never reference an unbound value under set -u.
 : "${WT_TARGET:=$T}"
 spawn_send_text_line() { # <target> <text>
   case "$BACKEND" in
@@ -4796,7 +4804,7 @@ rovo_endpoint_cleanup() {
   fi
   local tab_id=
   [ "$BACKEND" = zellij ] && tab_id=$ZELLIJ_TAB_ID
-  fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null && SPAWN_ENDPOINT_CLOSED=1 || true
+  fm_backend_kill "$BACKEND" "${TMUX_WINDOW_TARGET:-$T}" "$tab_id" "fm-$ID" 2>/dev/null && SPAWN_ENDPOINT_CLOSED=1 || true
 }
 
 # agy carries its brief on the launch command, so it needs no delivery gate,
@@ -5779,7 +5787,7 @@ else
   fi
 fi
 
-META_WINDOW=$T
+META_WINDOW=${TMUX_WINDOW_TARGET:-$T}
 [ "$BACKEND" = orca ] && META_WINDOW=$W
 SPAWN_GEN="s$(date +%s).${BASHPID:-$$}.$RANDOM"
 SPAWN_META_PATH="$STATE/$ID.meta"
@@ -5798,7 +5806,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent forge backup_remote backup_prefix model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
+      split("window tmux_pane_id endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent forge backup_remote backup_prefix model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -5806,6 +5814,7 @@ preserve_relaunch_meta() {
 }
 {
   echo "window=$META_WINDOW"
+  [ "$BACKEND" != tmux ] || echo "tmux_pane_id=$TMUX_PANE_ID"
   echo "endpoint_task_id=$ID"
   echo "worktree=$WT"
   echo "project=$PROJ_ABS"
@@ -5831,7 +5840,7 @@ preserve_relaunch_meta() {
   echo "spawn_gen=$SPAWN_GEN"
   # Default-off writes no traceparent= line.
   # backend= is written only for a non-default (non-tmux) backend, so the
-  # default path's meta stays byte-identical (absent backend= means tmux;
+  # default path keeps the optional backend field (absent backend= means tmux;
   # data/fm-backend-design-d7's P1 compatibility contract).
   [ "$BACKEND" = tmux ] || echo "backend=$BACKEND"
   if [ "$BACKEND" = herdr ]; then

@@ -357,7 +357,7 @@ fi
 
 fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
 BACKEND=$FM_BACKEND_VALIDATED_BACKEND
-T=$FM_BACKEND_VALIDATED_TARGET
+T=$(fm_backend_io_target_of_meta "$META") || exit 1
 LABEL="fm-$ID"
 RECORDED_HARNESS=$(fm_meta_get "$META" harness)
 KIND=$(fm_meta_get "$META" kind)
@@ -1177,7 +1177,7 @@ do_relaunch() {
     # diagnostic. Let it through rather than dying with nothing to act on.
     if fm_backend_validate_task_endpoint "$META" "$ID" >/dev/null \
        && [ -n "$FM_BACKEND_VALIDATED_TARGET" ]; then
-      T=$FM_BACKEND_VALIDATED_TARGET
+      T=$(fm_backend_io_target_of_meta "$META") || die "replacement task pane could not be verified"
     else
       die "the replacement agent for $ID was launched, but task $ID's republished record no longer passes endpoint validation (the refusal above names the row), so this transaction cannot say which endpoint to confirm it on; reconcile $META before any further control action"
     fi

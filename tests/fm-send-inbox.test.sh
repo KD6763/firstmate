@@ -68,7 +68,7 @@ case "${1:-}" in
     fi
     exit 0 ;;
   display-message)
-    for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
+    for a in "$@"; do case "$a" in *pane_id*) printf '%%1\n'; exit 0 ;; *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
     if [ "${FM_FAKE_TMUX_COMPOSER:-}" = pending ]; then
@@ -77,7 +77,13 @@ case "${1:-}" in
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  list-windows) printf 'fm-t1\nwin\n'; exit 0 ;;
+  list-panes) printf '%%1\n'; exit 0 ;;
+  list-windows)
+    case "$*" in
+      *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|fm-t1\n@2|1|win\n@3|2|fm-domain\n' ;;
+      *) printf 'fm-t1\nwin\nfm-domain\n' ;;
+    esac
+    exit 0 ;;
 esac
 exit 0
 SH

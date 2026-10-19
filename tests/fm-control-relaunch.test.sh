@@ -65,7 +65,7 @@ case "${1:-}" in
     literal=0
     while [ $# -gt 0 ]; do
       case "$1" in
-        -t) shift 2 ;;
+        -t) printf '%s\n' "$2" >> "$D/targets"; shift 2 ;;
         -l) literal=1; shift ;;
         *) break ;;
       esac
@@ -104,6 +104,7 @@ case "${1:-}" in
   display-message)
     for a in "$@"; do
       case "$a" in
+        *pane_id*) printf '%%9\n'; exit 0 ;;
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
         *pane_current_path*)
@@ -139,7 +140,17 @@ case "${1:-}" in
       echo 'lost server' >&2
       exit 1
     fi
-    [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
+    if [ -f "$D/windows" ]; then
+      case "$*" in
+        *'#{window_id}|#{window_index}|#{window_name}'*) sed 's/^/@9|0|/' "$D/windows" ;;
+        *) cat "$D/windows" ;;
+      esac
+    fi
+    exit 0 ;;
+  list-panes)
+    printf '%%9\n'
+    [ ! -e "$D/split" ] || printf '%%10\n'
+    exit 0 ;;
   new-session)
     # Nothing in the relaunch path may ever create a session; recording the
     # call is how a refusal test proves that.
@@ -368,6 +379,8 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   local dir out rc gen_before gen_after
   dir=$(new_case same rl1)
   add_ship_task "$dir" rl1 claude
+  printf 'tmux_pane_id=%%9\n' >> "$dir/home/state/rl1.meta"
+  : > "$dir/fake/split"
   gen_before=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl1)
   printf 'busy_gen=%s\n' "$gen_before" >> "$dir/home/state/rl1.meta"
   out=$(run_control "$dir" rl1 relaunch --note "stopped mid-refactor"); rc=$?
@@ -375,6 +388,11 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   assert_contains "$out" "relaunched rl1 harness=claude from=claude" "the outcome should name the transition"
   [ "$(meta_field "$dir" rl1 window)" = "fmses:fm-rl1" ] \
     || fail "the endpoint must be reused, not recreated"
+  [ "$(meta_field "$dir" rl1 tmux_pane_id)" = '%9' ] \
+    || fail "relaunch must preserve the original pane binding"
+  [ -s "$dir/fake/targets" ] || fail "relaunch sent no input"
+  [ "$(sort -u "$dir/fake/targets")" = '%9' ] \
+    || fail "relaunch addressed the active split instead of its recorded pane"
   [ "$(meta_field "$dir" rl1 worktree)" = "$dir/wt" ] \
     || fail "the worktree must be reused, not reallocated"
   [ "$(meta_field "$dir" rl1 kind)" = ship ] || fail "kind must survive the relaunch"
@@ -2227,8 +2245,8 @@ test_reclaim_refuses_an_unreadable_endpoint() {
 
   out=$(run_spawn "$dir" rl63 --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "an unreadable endpoint must still refuse"
-  assert_contains "$out" "positively agent-free endpoint" \
-    "only a POSITIVELY proven agent-free endpoint may be relaunched into"
+  assert_contains "$out" "cannot resolve exact tmux window" \
+    "an unreadable window cannot establish a pane to relaunch into"
   assert_absent "$dir/fake/created-windows" \
     "a refused relaunch must not create an endpoint"
   [ ! -s "$dir/fake/literal" ] || fail "a refused relaunch must launch nothing"

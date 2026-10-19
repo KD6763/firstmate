@@ -162,6 +162,7 @@ case "${1:-}" in
   display-message)
     for a in "$@"; do
       case "$a" in
+        *pane_id*) printf '%%9\n'; exit 0 ;;
         *cursor_y*)
           # A modelled Devin screen parks the cursor on its composer row.
           if [ -f "$D/devin" ]; then
@@ -190,8 +191,14 @@ case "${1:-}" in
     fi
     if [ -f "$D/devin" ]; then devin_screen "$(cat "$D/devin")"; elif [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
     exit 0 ;;
+  list-panes) printf '%%9\n'; exit 0 ;;
   list-windows)
-    if [ -f "$D/windows" ]; then cat "$D/windows"; fi
+    if [ -f "$D/windows" ]; then
+      case "$*" in
+        *'#{window_id}|#{window_index}|#{window_name}'*) sed 's/^/@9|0|/' "$D/windows" ;;
+        *) cat "$D/windows" ;;
+      esac
+    fi
     exit 0 ;;
 esac
 exit 0

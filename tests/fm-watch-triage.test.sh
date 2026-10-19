@@ -3806,6 +3806,128 @@ test_gone_endpoint_reports_once_instead_of_escalating_forever() {
   pass "a record whose endpoint is dead or missing reports itself once and is never re-escalated"
 }
 
+test_unavailable_pane_binding_preserves_endpoint_reporting() {
+  local dir state fakebin out capture window key spec prior_hash
+  local failed='state: failed · source: run-step · run failed'
+  window='test:fm-wedge'; key=$(printf '%s' "$window" | tr ':/.' '___')
+  for spec in window-missing pane-missing ambiguous stale-binding; do
+    dir=$(wedge_threshold_fixture "pane-binding-$spec" 'working: still compiling' 0 10)
+    state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+    prior_hash=$(cat "$state/.hash-$key")
+    FM_TEST_TMUX_WINDOWS=fm-wedge
+    FM_FAKE_TMUX_PANES='%2'
+    FM_FAKE_TMUX_ALL_PANES='%2'
+    case "$spec" in
+      window-missing)
+        FM_TEST_TMUX_WINDOWS=fm-other
+        printf 'tmux_pane_id=%%1\n' >> "$state/wedge.meta" ;;
+      pane-missing)
+        printf 'tmux_pane_id=%%1\n' >> "$state/wedge.meta" ;;
+      ambiguous)
+        FM_FAKE_TMUX_PANES=$'%1\n%2'
+        FM_FAKE_TMUX_ALL_PANES=$'%1\n%2' ;;
+      stale-binding)
+        printf 'tmux_pane_id=%%3\n' >> "$state/wedge.meta"
+        FM_FAKE_TMUX_ALL_PANES=$'%2\n%3' ;;
+    esac
+    FM_FAKE_TMUX_LOG="$dir/tmux.log"
+    export FM_TEST_TMUX_WINDOWS FM_FAKE_TMUX_PANES FM_FAKE_TMUX_ALL_PANES FM_FAKE_TMUX_LOG
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$failed" exit \
+      || fail "$spec never surfaced at the existing threshold: $(cat "$out")"
+    [ "$(cat "$state/.hash-$key")" = "$prior_hash" ] \
+      || fail "$spec fabricated new capture content and changed the prior hash"
+    case "$spec" in
+      window-missing|pane-missing)
+        grep -F 'agent missing' "$out" >/dev/null \
+          || fail "$spec did not name the missing endpoint: $(cat "$out")"
+        [ ! -e "$state/.wedge-escalations-$key" ] \
+          || fail "$spec advanced the wedge ladder"
+        ack_stopped_cycle "$state" || fail "could not acknowledge $spec"
+        : > "$out"
+        wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$failed" absorb \
+          || fail "$spec re-reported an unchanged missing endpoint: $(cat "$out")"
+        [ "$(wedge_stale_wakes "$state" "$window")" -eq 0 ] \
+          || fail "$spec queued another missing wake" ;;
+      *)
+        grep -F 'possible wedge, escalation 1' "$out" >/dev/null \
+          || fail "$spec suppressed the ordinary ladder: $(cat "$out")"
+        grep -F 'agent missing' "$out" >/dev/null \
+          && fail "$spec mislabeled an unproven binding as a missing agent" ;;
+    esac
+    if grep -E 'capture-pane|pane_current_command|pane_tty' "$dir/tmux.log" >/dev/null; then
+      fail "$spec read pane content or processes through an unverified binding: $(cat "$dir/tmux.log")"
+    fi
+    unset FM_TEST_TMUX_WINDOWS FM_FAKE_TMUX_PANES FM_FAKE_TMUX_ALL_PANES FM_FAKE_TMUX_LOG
+  done
+  pass "missing windows and panes report once; ambiguous and stale bindings escalate without inspecting another pane"
+}
+
+test_afk_unavailable_pane_binding_hands_off_once_and_rearms() {
+  local dir state fakebin out capture window key spec prior_hash
+  local failed='state: failed · source: run-step · run failed'
+  window='test:fm-wedge'; key=$(printf '%s' "$window" | tr ':/.' '___')
+  for spec in missing ambiguous; do
+    dir=$(wedge_threshold_fixture "away-binding-$spec" 'working: still compiling' 0 10)
+    state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+    prior_hash=$(cat "$state/.hash-$key")
+    date +%s > "$state/.afk"
+    FM_TEST_TMUX_WINDOWS=fm-wedge
+    FM_FAKE_TMUX_PANES='%2'
+    FM_FAKE_TMUX_ALL_PANES='%2'
+    if [ "$spec" = missing ]; then
+      printf 'tmux_pane_id=%%1\n' >> "$state/wedge.meta"
+    else
+      FM_FAKE_TMUX_PANES=$'%1\n%2'
+      FM_FAKE_TMUX_ALL_PANES=$'%1\n%2'
+    fi
+    FM_FAKE_TMUX_LOG="$dir/tmux.log"
+    export FM_TEST_TMUX_WINDOWS FM_FAKE_TMUX_PANES FM_FAKE_TMUX_ALL_PANES FM_FAKE_TMUX_LOG
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$failed" exit \
+      || fail "away mode silently skipped a $spec pane binding: $(cat "$out")"
+    grep -F 'agent pane binding unavailable' "$out" >/dev/null \
+      || fail "away-mode handoff did not name the failed binding: $(cat "$out")"
+    [ "$(wedge_stale_wakes "$state" "$window")" -eq 1 ] \
+      || fail "away-mode failed binding did not queue exactly one handoff"
+    [ "$(cat "$state/.hash-$key")" = "$prior_hash" ] \
+      || fail "away-mode failed binding changed the prior pane hash"
+    ack_stopped_cycle "$state" || fail "could not acknowledge away-mode failed binding"
+    : > "$out"
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$failed" absorb \
+      || fail "unchanged away-mode binding repeatedly woke the daemon: $(cat "$out")"
+    [ "$(wedge_stale_wakes "$state" "$window")" -eq 0 ] \
+      || fail "unchanged away-mode binding queued another handoff"
+    if grep -E 'capture-pane|pane_current_command|pane_tty' "$dir/tmux.log" >/dev/null; then
+      fail "away-mode failed binding inspected another pane: $(cat "$dir/tmux.log")"
+    fi
+    ack_stopped_cycle "$state" || fail "could not acknowledge the silent away-mode round"
+
+    # Repair the same task, then break the same binding again. A successful
+    # capture must re-arm the handoff without requiring metadata to change.
+    FM_FAKE_TMUX_PANES='%1'
+    FM_FAKE_TMUX_ALL_PANES='%1'
+    : > "$out"
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$failed" absorb \
+      || fail "a repaired binding woke away-mode triage: $(cat "$out")"
+    grep -F 'capture-pane' "$dir/tmux.log" >/dev/null \
+      || fail "the repaired binding never produced a real capture"
+    ack_stopped_cycle "$state" || fail "could not acknowledge the repaired away-mode round"
+    if [ "$spec" = missing ]; then
+      FM_FAKE_TMUX_PANES='%2'
+      FM_FAKE_TMUX_ALL_PANES='%2'
+    else
+      FM_FAKE_TMUX_PANES=$'%1\n%2'
+      FM_FAKE_TMUX_ALL_PANES=$'%1\n%2'
+    fi
+    : > "$out"
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$failed" exit \
+      || fail "a later binding failure did not re-arm the away-mode handoff"
+    grep -F 'agent pane binding unavailable' "$out" >/dev/null \
+      || fail "the re-armed away-mode handoff lost its failed-binding reason"
+    unset FM_TEST_TMUX_WINDOWS FM_FAKE_TMUX_PANES FM_FAKE_TMUX_ALL_PANES FM_FAKE_TMUX_LOG
+  done
+  pass "away-mode missing and ambiguous bindings hand off once, avoid other panes, and re-arm after recovery"
+}
+
 # The load-bearing direction. A genuinely wedged LIVE agent must escalate exactly
 # as it did before, and so must every verdict short of proof: an unattributable
 # foreground process (`ambiguous`) and an unreadable endpoint keep the identical
@@ -5498,24 +5620,18 @@ test_afk_busy_declared_pause_ticking_pane_hands_off_once() {
   dir=$(make_case afk-busy-declared-pause-ticking); state="$dir/state"; fakebin="$dir/fakebin"
   out="$dir/watch.out"; drain_out="$dir/drain.out"; window="test:fm-afk-ticking-scout"
   statusf="$state/afk-ticking-scout.status"; ticks="$dir/ticks"
+  mv "$fakebin/tmux" "$fakebin/tmux-base"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
 case "${1:-}" in
-  list-windows)
-    [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] && printf '%s\n' "${FM_FAKE_TMUX_WINDOW#*:}"
-    exit 0 ;;
   capture-pane)
     n=$(( $(cat "$FM_FAKE_TMUX_TICKS" 2>/dev/null || echo 0) + 1 ))
     echo "$n" > "$FM_FAKE_TMUX_TICKS"
     printf 'Working... (%d.%ds) lavish-axi poll' "$(( 7200 + n ))" "$(( n % 10 ))"
     exit 0 ;;
-  display-message)
-    case "$*" in
-      *pane_current_command*) printf '%s\n' "${FM_FAKE_TMUX_CURRENT_COMMAND:-}"; exit 0 ;;
-    esac ;;
 esac
-exit 1
+exec "$(dirname "$0")/tmux-base" "$@"
 SH
   chmod +x "$fakebin/tmux"
   printf 'window=%s\nkind=scout\nharness=pi\n' "$window" > "$state/afk-ticking-scout.meta"
@@ -7035,6 +7151,8 @@ test_nonterminal_stale_provably_working_absorbed_then_escalated
 test_wedge_escalation_marks_demand_deep_inspection_after_threshold
 test_wedge_escalation_resets_when_pane_becomes_active
 test_gone_endpoint_reports_once_instead_of_escalating_forever
+test_unavailable_pane_binding_preserves_endpoint_reporting
+test_afk_unavailable_pane_binding_hands_off_once_and_rearms
 test_live_and_unproven_endpoints_still_wedge_escalate
 test_wedge_guards_absent_config_keeps_the_unchanged_ladder
 test_wedge_guard_critical_defers_one_window_at_a_time_up_to_the_cap
