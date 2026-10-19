@@ -1,0 +1,5 @@
+ok - inbox: a steer is written durably and round-trips byte-exact with a self-describing doorbell
+ok - inbox: a hostile-name doorbell executes as a no-op in bare shells
+ok - inbox: terminal-control inbox names are rejected without typing
+error: cannot resolve exact tmux window sess:fm-t1; refusing task I/O
+not ok - a proven-missing pane should return 3 from the ring, got 2
