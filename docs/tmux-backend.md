@@ -47,7 +47,8 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 Task input stays with the original agent pane when another pane is added to its window or selected, closing [issue #7539](https://github.com/kunchenguid/firstmate/issues/7539).
 Relaunch preserves that pane, while cleanup still closes the task window.
 Older records without a pane binding retain baseline non-destructive input and observation through the task window's sole remaining pane, so a moved agent pane can leave those reads following a monitor until the task is relaunched to bind one.
-Destructive and launch authority refuses an unbound record, while an ambiguous split or a stale binding refuses input; `fm_backend_io_target_of_meta` and `fm_backend_agent_authority_target_of_meta` in `bin/fm-backend.sh` own those contracts ([issue #7539](https://github.com/kunchenguid/firstmate/issues/7539)).
+Destructive and launch authority refuses an unbound record while its exact window survives or cannot be verified absent, while teardown may retire one after proven exact-window absence under the [unbound-task upgrade procedure](agent-control.md#upgrading-unbound-tmux-tasks).
+`fm_backend_io_target_of_meta` and `fm_backend_agent_authority_target_of_meta` in `bin/fm-backend.sh` own the pane-routing contracts, under which an ambiguous split or a stale binding refuses input ([issue #7539](https://github.com/kunchenguid/firstmate/issues/7539)).
 
 ### Agent liveness probe
 

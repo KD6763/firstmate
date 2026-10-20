@@ -1588,7 +1588,7 @@ spawn_abort_cleanup() {
     if fm_backend_kill tmux "${TMUX_WINDOW_TARGET:-$T}" 2>/dev/null; then
       SPAWN_ENDPOINT_CLOSED=1
     else
-      echo "warning: could not close tmux endpoint $T after the failed spawn of $ID; close it by hand before retrying" >&2
+      echo "warning: could not close tmux endpoint ${TMUX_WINDOW_TARGET:-$T} after the failed spawn of $ID; close it by hand before retrying" >&2
     fi
   fi
   # A fresh polytoken spawn that fails and leaves no record must leave its
@@ -1607,7 +1607,7 @@ spawn_abort_cleanup() {
       if fm_backend_kill "$BACKEND" "${TMUX_WINDOW_TARGET:-$T}" "$abort_tab_id" "fm-$ID" 2>/dev/null; then
         SPAWN_ENDPOINT_CLOSED=1
       else
-        echo "warning: could not close endpoint $T after the failed spawn of $ID; close it by hand so its slot returns to the pool" >&2
+        echo "warning: could not close endpoint ${TMUX_WINDOW_TARGET:-$T} after the failed spawn of $ID; close it by hand so its slot returns to the pool" >&2
       fi
     fi
     # These paths are per task id, so the per-id spawn lock is retaken for them
@@ -3903,9 +3903,9 @@ spawn_endpoint_closes_on_abort() {
 
 spawn_endpoint_hint() {
   if spawn_endpoint_closes_on_abort; then
-    printf 'window %s is closed on exit, returning any pool slot it held' "$T"
+    printf 'window %s is closed on exit, returning any pool slot it held' "${TMUX_WINDOW_TARGET:-$T}"
   else
-    printf 'inspect window %s' "$T"
+    printf 'inspect window %s' "${TMUX_WINDOW_TARGET:-$T}"
   fi
 }
 
@@ -4755,7 +4755,7 @@ kimi_wait_for_delivery() {
 
 kimi_spawn_fail() { # <detail>
   printf '%s\n' "$(status_stamp_line "failed: $1")" >>"$STATE/$ID.status"
-  echo "error: $1; inspect window $T" >&2
+  echo "error: $1; inspect window ${TMUX_WINDOW_TARGET:-$T}" >&2
 }
 
 # rovo mirrors kimi's launch-then-send shape exactly: a positional brief is
@@ -4823,7 +4823,7 @@ rovo_wait_for_delivery() {
 
 rovo_spawn_fail() { # <detail>
   printf '%s\n' "$(status_stamp_line "failed: $1")" >>"$STATE/$ID.status"
-  echo "error: $1; inspect window $T" >&2
+  echo "error: $1; inspect window ${TMUX_WINDOW_TARGET:-$T}" >&2
   rovo_endpoint_cleanup
 }
 
@@ -4896,7 +4896,7 @@ agy_wait_for_working() {
 
 agy_spawn_fail() {  # <detail>
   printf '%s\n' "$(status_stamp_line "failed: $1")" >>"$STATE/$ID.status"
-  echo "error: $1; inspect window $T" >&2
+  echo "error: $1; inspect window ${TMUX_WINDOW_TARGET:-$T}" >&2
   rovo_endpoint_cleanup
 }
 
@@ -4981,7 +4981,7 @@ spawn_record_polytoken_session() {
 
 polytoken_spawn_fail() {  # <detail>
   printf '%s\n' "$(status_stamp_line "failed: $1")" >>"$STATE/$ID.status"
-  echo "error: $1; inspect window $T" >&2
+  echo "error: $1; inspect window ${TMUX_WINDOW_TARGET:-$T}" >&2
   # A failed gate leaves nothing running or recorded: reap this launch's exact
   # session daemon (scoped to this task's sessions root), retire the per-task
   # wiring (the sessions roots, config dir, worktree hook layer, facet, and
@@ -5169,7 +5169,7 @@ agy)
     if "$FM_ROOT/bin/fm-agy-trust.sh" "$WT" "$PROJ_ABS" >/dev/null; then
       AGY_TRUST_PREREGISTERED=1
     else
-      echo "warning: could not pre-register agy workspace trust for $WT; the launch will answer the folder-trust dialog in window $T instead" >&2
+      echo "warning: could not pre-register agy workspace trust for $WT; the launch will answer the folder-trust dialog in window ${TMUX_WINDOW_TARGET:-$T} instead" >&2
     fi
   fi
   ;;
@@ -6464,7 +6464,7 @@ if [ "$HARNESS" = kimi ]; then
 fi
 if [ "$HARNESS" = rovo ]; then
   if ! rovo_wait_for_ready; then
-    rovo_spawn_fail "rovo did not show a verified ready signal before brief delivery in window $T"
+    rovo_spawn_fail "rovo did not show a verified ready signal before brief delivery in window ${TMUX_WINDOW_TARGET:-$T}"
     exit 1
   fi
   ROVO_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
@@ -6474,26 +6474,26 @@ if [ "$HARNESS" = rovo ]; then
   if ! ROVO_SUBMIT_VERDICT=$(fm_backend_send_text_submit \
     "$BACKEND" "$T" "$ROVO_POINTER" "$ROVO_SUBMIT_RETRIES" \
     "$ROVO_SUBMIT_SLEEP" "$ROVO_SUBMIT_SETTLE" "$W"); then
-    rovo_spawn_fail "rovo brief pointer could not be submitted into window $T"
+    rovo_spawn_fail "rovo brief pointer could not be submitted into window ${TMUX_WINDOW_TARGET:-$T}"
     exit 1
   fi
   if [ "$ROVO_SUBMIT_VERDICT" = send-failed ]; then
-    rovo_spawn_fail "rovo brief pointer could not be submitted into window $T"
+    rovo_spawn_fail "rovo brief pointer could not be submitted into window ${TMUX_WINDOW_TARGET:-$T}"
     exit 1
   fi
   if ! rovo_wait_for_delivery; then
-    rovo_spawn_fail "rovo brief pointer delivery was not confirmed in window $T"
+    rovo_spawn_fail "rovo brief pointer delivery was not confirmed in window ${TMUX_WINDOW_TARGET:-$T}"
     exit 1
   fi
 fi
 if [ "$HARNESS" = agy ]; then
   if ! agy_wait_for_working; then
     if [ "$AGY_TRUST_ANSWERED" -eq 1 ]; then
-      agy_spawn_fail "agy did not start processing its brief after the folder-trust dialog was answered in window $T"
+      agy_spawn_fail "agy did not start processing its brief after the folder-trust dialog was answered in window ${TMUX_WINDOW_TARGET:-$T}"
     elif [ "$AGY_TRUST_PREREGISTERED" -eq 1 ]; then
-      agy_spawn_fail "agy did not start processing its brief in the pre-trusted worktree in window $T"
+      agy_spawn_fail "agy did not start processing its brief in the pre-trusted worktree in window ${TMUX_WINDOW_TARGET:-$T}"
     else
-      agy_spawn_fail "agy never showed its folder-trust dialog on an unregistered worktree in window $T, so the brief could not be confirmed to run there"
+      agy_spawn_fail "agy never showed its folder-trust dialog on an unregistered worktree in window ${TMUX_WINDOW_TARGET:-$T}, so the brief could not be confirmed to run there"
     fi
     exit 1
   fi
@@ -6505,7 +6505,7 @@ fi
 # blocked launch from a wedged one.
 if [ "$HARNESS" = polytoken ] && [ "$RAW_LAUNCH" -eq 0 ]; then
   if ! polytoken_wait_for_ready; then
-    polytoken_spawn_fail "polytoken did not start processing its brief in window $T (a first-start license dialog is the one known blocker; it is never auto-accepted)"
+    polytoken_spawn_fail "polytoken did not start processing its brief in window ${TMUX_WINDOW_TARGET:-$T} (a first-start license dialog is the one known blocker; it is never auto-accepted)"
     exit 1
   fi
   if ! spawn_record_polytoken_session; then
@@ -6559,9 +6559,9 @@ fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
     if spawn_fresh_commit_rollback; then
-      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint ${TMUX_WINDOW_TARGET:-$T} and local copy $WT by hand, then re-run the spawn" >&2
     else
-      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint ${TMUX_WINDOW_TARGET:-$T} and local copy $WT by hand, then remove the record and busy state before retrying" >&2
     fi
   else
     echo "error: task $ID was republished but its backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); fix the backlog and re-run the relaunch" >&2

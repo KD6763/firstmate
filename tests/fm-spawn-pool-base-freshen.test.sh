@@ -722,8 +722,8 @@ test_pool_slot_claim_follows_the_spawn_outcome() {
   [ "$status" -ne 0 ] || fail "spawn launched a worker on a slot it could not claim"
   assert_contains "$out" "could not claim Treehouse pool slot" \
     "spawn did not name the unclaimable slot as the reason"
-  assert_contains "$out" "is closed on exit" \
-    "an unclaimable-slot refusal must close its new pre-launch endpoint"
+  assert_contains "$out" "window firstmate:fm-$id is closed on exit" \
+    "an unclaimable-slot refusal must identify its closed lifecycle window"
   [ ! -s "$FAKEBIN_DIR/.spawn-window" ] \
     || fail "unclaimable-slot refusal left the new endpoint alive"
   [ -d "$SLOT_CLAIM" ] || fail "spawn replaced the directory blocking its slot claim"
@@ -1017,8 +1017,8 @@ test_treehouse_isolation_refusal_points_at_what_survives() {
     "the codex spawn did not refuse on the post-poll isolation check"$'\n'"$out"
   assert_contains "$out" "refusing to launch to avoid tangling the primary checkout. Inspect target $POOL_DIR" \
     "a codex isolation refusal must name the surviving worktree"$'\n'"$out"
-  assert_contains "$out" "is closed on exit" \
-    "a fresh codex isolation refusal must explain the endpoint cleanup"
+  assert_contains "$out" "window firstmate:fm-$id is closed on exit" \
+    "a fresh codex isolation refusal must identify its closed lifecycle window"
   [ ! -s "$FAKEBIN_DIR/.spawn-window" ] || fail "refused codex spawn left its endpoint"
 
   id='pool-isolation-polytoken-r1'
@@ -1039,7 +1039,7 @@ SH
   [ "$status" -ne 0 ] || fail "a polytoken spawn whose slot stopped being isolated should refuse"
   assert_contains "$out" "treehouse get did not yield an isolated worktree" \
     "the polytoken spawn did not refuse on the post-poll isolation check"$'\n'"$out"
-  assert_contains "$out" "pool (window %1 is closed on exit" \
+  assert_contains "$out" "pool (window firstmate:fm-$id is closed on exit" \
     "a fresh polytoken isolation refusal must name the worktree and the closed window"$'\n'"$out"
   assert_not_contains "$out" "Inspect target firstmate:fm-$id" \
     "a fresh polytoken isolation refusal must not point at its closed window"
