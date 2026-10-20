@@ -2028,7 +2028,7 @@ test_spawn_gen_unbound_record_requires_exact_window_absence() {
     || fail "spawn-gen-unbound-absent: teardown did not report completion"
   assert_absent "$case_dir/state/task-x1.meta" \
     "spawn-gen-unbound-absent: teardown left the task record"
-  [ "$(backlog_row_state "$case_dir")" = done ] \
+  [ "$(backlog_row_state "$case_dir")" = "done" ] \
     || fail "spawn-gen-unbound-absent: teardown did not close the backlog item"
   "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
     || fail "spawn-gen-unbound-absent: teardown removed the neighboring pane"
