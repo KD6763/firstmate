@@ -1199,14 +1199,27 @@ MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
 BASE_BRANCH=$(grep '^base_branch=' "$META" | cut -d= -f2- || true)
 
+teardown_tmux_pane_binding_valid() {
+  local pane
+  pane=$(fm_backend_meta_exact_value "$1" tmux_pane_id) || return 1
+  case "$pane" in
+    %*) pane=${pane#%} ;;
+    *) return 1 ;;
+  esac
+  case "$pane" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  return 0
+}
+
 TEARDOWN_TMUX_UNBOUND=0
-if [ "$BACKEND" = tmux ] && ! grep -q '^tmux_pane_id=' "$META"; then
+if [ "$BACKEND" = tmux ] && ! teardown_tmux_pane_binding_valid "$META"; then
   TEARDOWN_TMUX_UNBOUND=1
 fi
 teardown_require_unbound_tmux_window_absent() {  # <meta> <task-id> <backend> <target> <legacy>
   local meta=$1 task_id=$2 backend=$3 target=$4 legacy=$5 window_status=0
   [ "$backend" = tmux ] || return 0
-  grep -q '^tmux_pane_id=' "$meta" && return 0
+  teardown_tmux_pane_binding_valid "$meta" && return 0
   fm_backend_source tmux || return 1
   fm_backend_tmux_window_id "${target%%:*}" "${target#*:}" >/dev/null \
     || window_status=$?

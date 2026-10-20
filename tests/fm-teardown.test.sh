@@ -2025,6 +2025,66 @@ test_spawn_gen_unbound_record_requires_exact_window_absence() {
   pass "spawn-gen teardown requires a proven-absent exact window for unbound tmux records"
 }
 
+test_invalid_tmux_pane_bindings_require_exact_window_absence() {
+  local form case_dir before rc sentinel_pane
+
+  for form in empty malformed duplicate; do
+    case_dir=$(make_case "invalid-pane-$form")
+    write_meta "$case_dir" no-mistakes ship
+    case "$form" in
+      empty) printf '%s\n' 'tmux_pane_id=' >> "$case_dir/state/task-x1.meta" ;;
+      malformed) printf '%s\n' 'tmux_pane_id=pane-1' >> "$case_dir/state/task-x1.meta" ;;
+      duplicate)
+        printf '%s\n' 'tmux_pane_id=%1' 'tmux_pane_id=%2' \
+          >> "$case_dir/state/task-x1.meta"
+        ;;
+    esac
+    seed_backlog_in_flight "$case_dir"
+    wt_commit "$case_dir" "landed invalid pane work"
+    add_fork_with_pushed_branch "$case_dir"
+    add_private_tmux_socket "$case_dir"
+    "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+    sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
+    before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+    rc=0
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+    assert_unbound_tmux_refusal "$case_dir" "invalid-pane-$form" "$before" "$rc"
+    "$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{window_name}' >/dev/null \
+      || fail "invalid-pane-$form: refusal removed the task window"
+    "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
+      || fail "invalid-pane-$form: refusal removed the neighboring pane"
+    "$case_dir/fakebin/tmux" kill-server
+  done
+  pass "invalid tmux pane bindings require a proven-absent exact window"
+}
+
+test_secondmate_invalid_tmux_pane_binding_preserves_home() {
+  local case_dir home before rc sentinel_pane
+
+  case_dir=$(make_case secondmate-invalid-pane)
+  write_meta "$case_dir" local-only secondmate
+  printf '%s\n' 'tmux_pane_id=not-a-pane' >> "$case_dir/state/task-x1.meta"
+  home="$case_dir/secondmate-home"
+  mkdir -p "$home/state" "$home/data" "$home/config" "$home/projects"
+  printf '%s\n' task-x1 > "$home/.fm-secondmate-home"
+  printf '%s\n' "home=$home" >> "$case_dir/state/task-x1.meta"
+  seed_backlog_in_flight "$case_dir" secondmate
+  add_private_tmux_socket "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+  sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
+  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+  rc=0
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  assert_unbound_tmux_refusal "$case_dir" secondmate-invalid-pane "$before" "$rc"
+  [ -d "$home" ] || fail "secondmate-invalid-pane: refusal removed the secondmate home"
+  "$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{window_name}' >/dev/null \
+    || fail "secondmate-invalid-pane: refusal removed the task window"
+  "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
+    || fail "secondmate-invalid-pane: refusal removed the neighboring pane"
+  "$case_dir/fakebin/tmux" kill-server
+  pass "secondmate teardown refuses an invalid tmux pane binding"
+}
+
 test_legacy_record_without_the_flag_refuses() {
   local case_dir rc
   case_dir=$(make_case legacy-noflag)
@@ -3528,6 +3588,42 @@ configure_secondmate_with_tmux_children() {  # <case-dir>
       "mode=local-only"
     : > "$home/state/$child.status"
   done
+}
+
+test_forced_secondmate_invalid_child_pane_binding_preserves_state() {
+  local case_dir home parent_before child_before rc sentinel_pane
+
+  case_dir=$(make_case invalid-child-pane)
+  write_meta "$case_dir" local-only secondmate
+  configure_secondmate_with_tmux_children "$case_dir"
+  home="$case_dir/secondmate-home"
+  printf '%s\n' 'tmux_pane_id=%1' 'tmux_pane_id=%2' \
+    >> "$home/state/child-a.meta"
+  seed_backlog_in_flight "$case_dir" secondmate
+  add_private_tmux_socket "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-child-a
+  sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
+  parent_before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+  child_before=$(cksum "$home/state/child-a.meta" | awk '{print $1, $2}')
+  rc=0
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "invalid-child-pane: forced teardown must refuse an invalid child binding"
+  grep -q "task child-a has no recorded agent pane" "$case_dir/stderr" \
+    || fail "invalid-child-pane: refusal did not name the invalid child binding"
+  [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$parent_before" ] \
+    || fail "invalid-child-pane: refusal modified the parent record"
+  [ "$(cksum "$home/state/child-a.meta" | awk '{print $1, $2}')" = "$child_before" ] \
+    || fail "invalid-child-pane: refusal modified the child record"
+  [ -e "$home/state/child-b.meta" ] && [ -d "$home" ] \
+    || fail "invalid-child-pane: refusal removed neighboring child or home state"
+  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
+    || fail "invalid-child-pane: refusal closed the backlog item"
+  "$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-child-a '#{window_name}' >/dev/null \
+    || fail "invalid-child-pane: refusal removed the child window"
+  "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
+    || fail "invalid-child-pane: refusal removed the neighboring pane"
+  "$case_dir/fakebin/tmux" kill-server
+  pass "forced secondmate teardown refuses an invalid child pane binding"
 }
 
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
@@ -5397,6 +5493,7 @@ test_herdr_flat_teardown_refuses_records_on_unparseable_presence
 test_herdr_flat_teardown_preflight_refuses_before_changes
 test_herdr_teardown_presentation_lock_namespace_is_per_account
 test_forced_secondmate_herdr_child_preflight_refuses_before_changes
+test_forced_secondmate_invalid_child_pane_binding_preserves_state
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks
 test_forced_secondmate_herdr_child_retains_records_when_close_unconfirmed
 test_forced_teardown_retains_nested_secondmate_home_when_grandchild_close_unconfirmed
@@ -5445,6 +5542,8 @@ test_windowless_leftover_retries_its_retained_legacy_stamp_without_the_flag
 test_legacy_record_teardown_completes_when_landed_and_endpoint_missing
 test_legacy_record_authority_uses_the_agent_pane
 test_spawn_gen_unbound_record_requires_exact_window_absence
+test_invalid_tmux_pane_bindings_require_exact_window_absence
+test_secondmate_invalid_tmux_pane_binding_preserves_home
 test_legacy_record_teardown_refuses_unlanded_work
 test_legacy_record_teardown_refuses_an_ambiguous_endpoint
 test_legacy_record_rolls_the_stamp_back_when_the_marker_write_fails
