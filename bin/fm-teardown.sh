@@ -1216,14 +1216,24 @@ TEARDOWN_TMUX_UNBOUND=0
 if [ "$BACKEND" = tmux ] && ! teardown_tmux_pane_binding_valid "$META"; then
   TEARDOWN_TMUX_UNBOUND=1
 fi
-teardown_require_unbound_tmux_window_absent() {  # <meta> <task-id> <backend> <target> <legacy>
-  local meta=$1 task_id=$2 backend=$3 target=$4 legacy=$5 window_status=0
+teardown_require_tmux_endpoint_authority() {  # <meta> <task-id> <backend> <target> <legacy>
+  local meta=$1 task_id=$2 backend=$3 target=$4 legacy=$5 endpoint_status=0
   [ "$backend" = tmux ] || return 0
-  teardown_tmux_pane_binding_valid "$meta" && return 0
+  if teardown_tmux_pane_binding_valid "$meta"; then
+    fm_backend_agent_authority_target_of_meta "$meta" >/dev/null \
+      || endpoint_status=$?
+    case "$endpoint_status" in
+      0|2) return 0 ;;
+      *)
+        echo "REFUSED: task $task_id's recorded agent pane is not verified in its exact recorded tmux window $target; teardown cannot safely close or remove this task. Nothing was changed." >&2
+        return 1
+        ;;
+    esac
+  fi
   fm_backend_source tmux || return 1
   fm_backend_tmux_window_id "${target%%:*}" "${target#*:}" >/dev/null \
-    || window_status=$?
-  case "$window_status" in
+    || endpoint_status=$?
+  case "$endpoint_status" in
     2) return 0 ;;
     *)
       echo "REFUSED: task $task_id has no recorded agent pane and its exact recorded tmux window $target is not proven absent; teardown cannot safely close or remove this task. Nothing was changed." >&2
@@ -1236,7 +1246,7 @@ teardown_require_unbound_tmux_window_absent() {  # <meta> <task-id> <backend> <t
   esac
 }
 if [ "$TEARDOWN_WINDOWLESS" != 1 ] && [ "$KIND" != secondmate ]; then
-  teardown_require_unbound_tmux_window_absent \
+  teardown_require_tmux_endpoint_authority \
     "$META" "$ID" "$BACKEND" "$T" "$TEARDOWN_LEGACY_PENDING" || exit 1
 fi
 
@@ -3295,7 +3305,7 @@ preflight_firstmate_home_herdr_children() {  # <home>
   done
 }
 
-preflight_firstmate_home_unbound_tmux_children() {  # <home>
+preflight_firstmate_home_tmux_endpoint_authority() {  # <home>
   local home=$1 sub_state child_meta child_id child_backend child_target child_kind child_home child_wt
   sub_state="$home/state"
   [ -d "$sub_state" ] || return 0
@@ -3305,7 +3315,7 @@ preflight_firstmate_home_unbound_tmux_children() {  # <home>
     fm_backend_validate_task_endpoint "$child_meta" "$child_id" || return 1
     child_backend=$FM_BACKEND_VALIDATED_BACKEND
     child_target=$FM_BACKEND_VALIDATED_TARGET
-    teardown_require_unbound_tmux_window_absent \
+    teardown_require_tmux_endpoint_authority \
       "$child_meta" "$child_id" "$child_backend" "$child_target" 0 || return 1
     child_kind=$(meta_value "$child_meta" kind)
     [ -n "$child_kind" ] || child_kind=ship
@@ -3313,7 +3323,7 @@ preflight_firstmate_home_unbound_tmux_children() {  # <home>
       child_wt=$(meta_value "$child_meta" worktree)
       child_home=$(meta_value "$child_meta" home)
       [ -n "$child_home" ] || child_home=$child_wt
-      preflight_firstmate_home_unbound_tmux_children "$child_home" || return 1
+      preflight_firstmate_home_tmux_endpoint_authority "$child_home" || return 1
     fi
   done
 }
@@ -3520,7 +3530,7 @@ if [ "$KIND" = secondmate ]; then
     validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
     preflight_descendant_task_locks "$HOME_PATH" || exit 1
     validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
-    preflight_firstmate_home_unbound_tmux_children "$HOME_PATH" || exit 1
+    preflight_firstmate_home_tmux_endpoint_authority "$HOME_PATH" || exit 1
     preflight_descendant_treehouse_slots || exit 1
     if [ "$BACKEND" = herdr ]; then
       teardown_herdr_preflight_target "$T" "$ID" || exit 1
@@ -3543,7 +3553,7 @@ if [ "$KIND" = secondmate ] && [ "$FORCE" != "--force" ]; then
 fi
 
 if [ "$KIND" = secondmate ]; then
-  teardown_require_unbound_tmux_window_absent \
+  teardown_require_tmux_endpoint_authority \
     "$META" "$ID" "$BACKEND" "$T" "$TEARDOWN_LEGACY_PENDING" || exit 1
   preflight_firstmate_home_process_event_tree "$HOME_PATH" "secondmate home" || exit 1
 fi
