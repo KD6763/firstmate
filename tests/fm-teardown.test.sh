@@ -1853,11 +1853,13 @@ prepare_landed_legacy_tmux_case() {
   add_private_tmux_socket "$case_dir"
 }
 
-assert_legacy_endpoint_refusal() {
+assert_unbound_tmux_refusal() {
   local case_dir=$1 label=$2 before=$3 rc=$4
-  expect_code 1 "$rc" "$label: teardown must refuse while agent identity is not safely dead"
-  grep -q "not confidently dead or agent-less" "$case_dir/stderr" \
-    || fail "$label: refusal did not name the endpoint authority gate"
+  expect_code 1 "$rc" "$label: teardown must refuse while the exact window is not proven absent"
+  grep -q "has no recorded agent pane" "$case_dir/stderr" \
+    || fail "$label: refusal did not name the missing pane binding"
+  grep -q "exact recorded tmux window" "$case_dir/stderr" \
+    || fail "$label: refusal did not name the exact-window gate"
   [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$before" ] \
     || fail "$label: refusal modified the task record"
   [ "$(backlog_row_state "$case_dir")" = in_flight ] \
@@ -1886,8 +1888,8 @@ test_legacy_record_authority_uses_the_agent_pane() {
   before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
   rc=0
   run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  assert_legacy_endpoint_refusal "$case_dir" legacy-moved-live "$before" "$rc"
-  grep -Fq 'for unbound tmux records close the exact recorded window' "$case_dir/stderr" \
+  assert_unbound_tmux_refusal "$case_dir" legacy-moved-live "$before" "$rc"
+  grep -Fq 'close the exact recorded window' "$case_dir/stderr" \
     || fail "legacy-moved-live: refusal did not explain how to establish authority"
   [ "$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')" = "$monitor_pane" ] \
     || fail "legacy-moved-live: refusal did not preserve the surviving monitor"
@@ -1902,8 +1904,8 @@ test_legacy_record_authority_uses_the_agent_pane() {
   before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
   rc=0
   run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  assert_legacy_endpoint_refusal "$case_dir" legacy-single-live "$before" "$rc"
-  grep -Fq 'for unbound tmux records close the exact recorded window' "$case_dir/stderr" \
+  assert_unbound_tmux_refusal "$case_dir" legacy-single-live "$before" "$rc"
+  grep -Fq 'close the exact recorded window' "$case_dir/stderr" \
     || fail "legacy-single-live: refusal did not explain how to establish authority"
   kill -0 "$agent_pid" 2>/dev/null || fail "legacy-single-live: refusal terminated the live agent"
   "$case_dir/fakebin/tmux" kill-server
@@ -1914,8 +1916,8 @@ test_legacy_record_authority_uses_the_agent_pane() {
   before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
   rc=0
   run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  assert_legacy_endpoint_refusal "$case_dir" legacy-single-dead "$before" "$rc"
-  grep -Fq 'for unbound tmux records close the exact recorded window' "$case_dir/stderr" \
+  assert_unbound_tmux_refusal "$case_dir" legacy-single-dead "$before" "$rc"
+  grep -Fq 'close the exact recorded window' "$case_dir/stderr" \
     || fail "legacy-single-dead: refusal did not explain how to establish authority"
   "$case_dir/fakebin/tmux" kill-server
 
@@ -1947,18 +1949,80 @@ test_legacy_record_authority_uses_the_agent_pane() {
   case_dir=$(make_case legacy-inventory-unreadable)
   prepare_landed_legacy_tmux_case "$case_dir"
   "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-  agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
-  printf 'tmux_pane_id=%s\n' "$agent_pane" >> "$case_dir/state/task-x1.meta"
   : > "$case_dir/tmux-unreadable"
   before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
   rc=0
   run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  assert_legacy_endpoint_refusal "$case_dir" legacy-inventory-unreadable "$before" "$rc"
+  assert_unbound_tmux_refusal "$case_dir" legacy-inventory-unreadable "$before" "$rc"
   rm -f "$case_dir/tmux-unreadable"
   "$case_dir/fakebin/tmux" has-session -t firstmate \
     || fail "legacy-inventory-unreadable: refusal removed the lifecycle window"
   "$case_dir/fakebin/tmux" kill-server
   pass "legacy teardown authority follows the agent pane and fails closed"
+}
+
+test_spawn_gen_unbound_record_requires_exact_window_absence() {
+  local case_dir before rc out sentinel_pane
+
+  case_dir=$(make_case spawn-gen-unbound-live)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  wt_commit "$case_dir" "landed unbound work"
+  add_fork_with_pushed_branch "$case_dir"
+  add_private_tmux_socket "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+  sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
+  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+  rc=0
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  assert_unbound_tmux_refusal "$case_dir" spawn-gen-unbound-live "$before" "$rc"
+  "$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{window_name}' >/dev/null \
+    || fail "spawn-gen-unbound-live: refusal removed the task window"
+  "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
+    || fail "spawn-gen-unbound-live: refusal removed the neighboring pane"
+  "$case_dir/fakebin/tmux" kill-server
+
+  case_dir=$(make_case spawn-gen-unbound-unreadable)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  wt_commit "$case_dir" "landed unbound work"
+  add_fork_with_pushed_branch "$case_dir"
+  add_private_tmux_socket "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+  sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
+  : > "$case_dir/tmux-unreadable"
+  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+  rc=0
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  assert_unbound_tmux_refusal "$case_dir" spawn-gen-unbound-unreadable "$before" "$rc"
+  rm -f "$case_dir/tmux-unreadable"
+  "$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{window_name}' >/dev/null \
+    || fail "spawn-gen-unbound-unreadable: refusal removed the task window"
+  "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
+    || fail "spawn-gen-unbound-unreadable: refusal removed the neighboring pane"
+  "$case_dir/fakebin/tmux" kill-server
+
+  case_dir=$(make_case spawn-gen-unbound-absent)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  wt_commit "$case_dir" "landed unbound work"
+  add_fork_with_pushed_branch "$case_dir"
+  add_private_tmux_socket "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+  sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
+  "$case_dir/fakebin/tmux" kill-window -t '=firstmate:=fm-task-x1'
+  out=$(run_teardown "$case_dir") \
+    || fail "spawn-gen-unbound-absent: teardown refused a proven-absent exact window"
+  printf '%s\n' "$out" | grep -Fq 'teardown task-x1 complete' \
+    || fail "spawn-gen-unbound-absent: teardown did not report completion"
+  assert_absent "$case_dir/state/task-x1.meta" \
+    "spawn-gen-unbound-absent: teardown left the task record"
+  [ "$(backlog_row_state "$case_dir")" = done ] \
+    || fail "spawn-gen-unbound-absent: teardown did not close the backlog item"
+  "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
+    || fail "spawn-gen-unbound-absent: teardown removed the neighboring pane"
+  "$case_dir/fakebin/tmux" kill-server
+  pass "spawn-gen teardown requires a proven-absent exact window for unbound tmux records"
 }
 
 test_legacy_record_without_the_flag_refuses() {
@@ -2215,13 +2279,7 @@ test_legacy_record_teardown_refuses_an_ambiguous_endpoint() {
   rc=$?
   set -e
 
-  expect_code 1 "$rc" "legacy-ambiguous: an unreadable endpoint must refuse the legacy acceptance"
-  grep -q "not confidently dead or agent-less" "$case_dir/stderr" \
-    || fail "legacy-ambiguous: the refusal did not name the endpoint state"
-  [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$before" ] \
-    || fail "legacy-ambiguous: the endpoint refusal modified the task record"
-  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
-    || fail "legacy-ambiguous: the endpoint refusal closed the backlog item anyway"
+  assert_unbound_tmux_refusal "$case_dir" legacy-ambiguous "$before" "$rc"
   pass "an endpoint that cannot be confidently read as dead refuses --legacy-record teardown"
 }
 
@@ -5386,6 +5444,7 @@ test_windowless_record_outside_the_leftover_class_still_refuses
 test_windowless_leftover_retries_its_retained_legacy_stamp_without_the_flag
 test_legacy_record_teardown_completes_when_landed_and_endpoint_missing
 test_legacy_record_authority_uses_the_agent_pane
+test_spawn_gen_unbound_record_requires_exact_window_absence
 test_legacy_record_teardown_refuses_unlanded_work
 test_legacy_record_teardown_refuses_an_ambiguous_endpoint
 test_legacy_record_rolls_the_stamp_back_when_the_marker_write_fails

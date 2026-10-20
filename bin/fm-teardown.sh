@@ -205,11 +205,11 @@
 #   teardown then proceeds only when the recorded endpoint is confirmed dead or
 #   agent-less (bin/fm-backend.sh's recovery-grade classifier), and without
 #   --force the worktree still passes the ordinary landed-work checks.
-#   An attended --legacy-record retirement of a tmux record that also lacks
-#   tmux_pane_id requires its exact recorded window to be absent: first finish
-#   or exit the task in its own terminal and close that window after preserving
-#   its work. A surviving window, even with one idle shell, is not agent proof.
-#   No pane is adopted or recorded by this path. The
+#   Every tmux record that lacks tmux_pane_id requires its exact recorded window
+#   to be absent: first finish or exit the task in its own terminal and close
+#   that window after preserving its work. A surviving window, even with one
+#   idle shell, is not agent proof. No pane is adopted or recorded by this path.
+#   A record that also lacks spawn_gen still requires --legacy-record. The
 #   accepted legacy incarnation is stamped into the record before its close is
 #   recorded and named in the teardown line; the flag never relaxes the
 #   unlanded-work refusal, which --force alone can authorize. A legacy- stamp
@@ -1199,6 +1199,34 @@ MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
 BASE_BRANCH=$(grep '^base_branch=' "$META" | cut -d= -f2- || true)
 
+TEARDOWN_TMUX_UNBOUND=0
+if [ "$BACKEND" = tmux ] && ! grep -q '^tmux_pane_id=' "$META"; then
+  TEARDOWN_TMUX_UNBOUND=1
+fi
+teardown_require_unbound_tmux_window_absent() {  # <meta> <task-id> <backend> <target> <legacy>
+  local meta=$1 task_id=$2 backend=$3 target=$4 legacy=$5 window_status=0
+  [ "$backend" = tmux ] || return 0
+  grep -q '^tmux_pane_id=' "$meta" && return 0
+  fm_backend_source tmux || return 1
+  fm_backend_tmux_window_id "${target%%:*}" "${target#*:}" >/dev/null \
+    || window_status=$?
+  case "$window_status" in
+    2) return 0 ;;
+    *)
+      echo "REFUSED: task $task_id has no recorded agent pane and its exact recorded tmux window $target is not proven absent; teardown cannot safely close or remove this task. Nothing was changed." >&2
+      if [ "$legacy" = 1 ]; then
+        echo "Finish or exit the task from its own terminal and preserve its work, close the exact recorded window, then retry --legacy-record teardown (docs/agent-control.md#upgrading-unbound-tmux-tasks)." >&2
+      else
+        echo "Finish or exit the task from its own terminal and preserve its work, close the exact recorded window, then retry teardown (docs/agent-control.md#upgrading-unbound-tmux-tasks)." >&2
+      fi
+      return 1 ;;
+  esac
+}
+if [ "$TEARDOWN_WINDOWLESS" != 1 ] && [ "$KIND" != secondmate ]; then
+  teardown_require_unbound_tmux_window_absent \
+    "$META" "$ID" "$BACKEND" "$T" "$TEARDOWN_LEGACY_PENDING" || exit 1
+fi
+
 # A record accepted as a legacy incarnation (no spawn_gen, and either
 # --legacy-record given or the record is windowless) may be torn down only
 # when its recorded endpoint is confidently gone or agent-less. Windowless
@@ -1212,23 +1240,12 @@ BASE_BRANCH=$(grep '^base_branch=' "$META" | cut -d= -f2- || true)
 if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
   if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
     TEARDOWN_LEGACY_ENDPOINT=missing
+  elif [ "$TEARDOWN_TMUX_UNBOUND" = 1 ]; then
+    TEARDOWN_LEGACY_ENDPOINT=missing
   else
     TEARDOWN_LEGACY_IO_STATUS=0
-    if [ "$LEGACY_RECORD_GIVEN" = 1 ] && [ "$BACKEND" = tmux ] \
-       && ! grep -q '^tmux_pane_id=' "$META"; then
-      # Attended retirement only, never recovery/adoption: endpoint validation
-      # above already binds T to this task. Refuse any surviving exact window,
-      # even if its sole pane now looks like a shell or a monitor.
-      fm_backend_source tmux || exit 1
-      TEARDOWN_LEGACY_IO_STATUS=1
-      TEARDOWN_LEGACY_WINDOW_STATUS=0
-      fm_backend_tmux_window_id "${T%%:*}" "${T#*:}" >/dev/null \
-        || TEARDOWN_LEGACY_WINDOW_STATUS=$?
-      [ "$TEARDOWN_LEGACY_WINDOW_STATUS" -ne 2 ] || TEARDOWN_LEGACY_IO_STATUS=2
-    else
-      TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$META") \
-        || TEARDOWN_LEGACY_IO_STATUS=$?
-    fi
+    TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$META") \
+      || TEARDOWN_LEGACY_IO_STATUS=$?
     case "$TEARDOWN_LEGACY_IO_STATUS" in
       0) TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$TEARDOWN_LEGACY_IO_TARGET") ;;
       2) TEARDOWN_LEGACY_ENDPOINT=missing ;;
@@ -3265,6 +3282,29 @@ preflight_firstmate_home_herdr_children() {  # <home>
   done
 }
 
+preflight_firstmate_home_unbound_tmux_children() {  # <home>
+  local home=$1 sub_state child_meta child_id child_backend child_target child_kind child_home child_wt
+  sub_state="$home/state"
+  [ -d "$sub_state" ] || return 0
+  for child_meta in "$sub_state"/*.meta; do
+    [ -e "$child_meta" ] || continue
+    child_id=$(basename "$child_meta" .meta)
+    fm_backend_validate_task_endpoint "$child_meta" "$child_id" || return 1
+    child_backend=$FM_BACKEND_VALIDATED_BACKEND
+    child_target=$FM_BACKEND_VALIDATED_TARGET
+    teardown_require_unbound_tmux_window_absent \
+      "$child_meta" "$child_id" "$child_backend" "$child_target" 0 || return 1
+    child_kind=$(meta_value "$child_meta" kind)
+    [ -n "$child_kind" ] || child_kind=ship
+    if [ "$child_kind" = secondmate ]; then
+      child_wt=$(meta_value "$child_meta" worktree)
+      child_home=$(meta_value "$child_meta" home)
+      [ -n "$child_home" ] || child_home=$child_wt
+      preflight_firstmate_home_unbound_tmux_children "$child_home" || return 1
+    fi
+  done
+}
+
 # endpoint_close_refusal: the one report for an endpoint close that could not
 # do its job, wherever a close is attempted, and the one decision about what
 # that costs. Reporting such a close as a completed cleanup does not merely
@@ -3467,6 +3507,7 @@ if [ "$KIND" = secondmate ]; then
     validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
     preflight_descendant_task_locks "$HOME_PATH" || exit 1
     validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
+    preflight_firstmate_home_unbound_tmux_children "$HOME_PATH" || exit 1
     preflight_descendant_treehouse_slots || exit 1
     if [ "$BACKEND" = herdr ]; then
       teardown_herdr_preflight_target "$T" "$ID" || exit 1
@@ -3489,6 +3530,8 @@ if [ "$KIND" = secondmate ] && [ "$FORCE" != "--force" ]; then
 fi
 
 if [ "$KIND" = secondmate ]; then
+  teardown_require_unbound_tmux_window_absent \
+    "$META" "$ID" "$BACKEND" "$T" "$TEARDOWN_LEGACY_PENDING" || exit 1
   preflight_firstmate_home_process_event_tree "$HOME_PATH" "secondmate home" || exit 1
 fi
 
