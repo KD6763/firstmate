@@ -1,0 +1,18 @@
+
+=== recovery case: moved ===
+SECONDMATE_LIVENESS: secondmate sm1: skipped: endpoint probe unreadable (backend=tmux)
+SECONDMATE_SYNC: secondmate sm1: skipped: primary default-branch commit cannot be resolved
+bootstrap_rc=0 meta_sha_before=6aa5db8bfa8c35ff3b3b1f5db45f61d3d8d43dabb9a79586a8035cb2bc467dcb meta_sha_after=6aa5db8bfa8c35ff3b3b1f5db45f61d3d8d43dabb9a79586a8035cb2bc467dcb
+ok - moved recovery classification preserved the sentinel and enforced the expected authority
+
+=== recovery case: unreadable ===
+SECONDMATE_LIVENESS: secondmate sm1: skipped: endpoint probe unreadable (backend=tmux)
+SECONDMATE_SYNC: secondmate sm1: skipped: primary default-branch commit cannot be resolved
+bootstrap_rc=0 meta_sha_before=4c354f39a6ea52d2066ef2cc89f2fe1b55dc00a1c6e70bcfdd61022b20bd2596 meta_sha_after=4c354f39a6ea52d2066ef2cc89f2fe1b55dc00a1c6e70bcfdd61022b20bd2596
+ok - unreadable recovery classification preserved the sentinel and enforced the expected authority
+
+=== recovery case: absent ===
+SECONDMATE_LIVENESS: secondmate sm1: respawn failed after recorded endpoint confidently missing: fm-gate-refuse: gate agent lifecycle permitted only against lab home <disposable-lab>
+SECONDMATE_SYNC: secondmate sm1: skipped: primary default-branch commit cannot be resolved
+bootstrap_rc=0 meta_sha_before=3a7a0576d50bf6fda8947f964994ceb4b6b1e717bfbd93538e8a379c51fc889a meta_sha_after=3a7a0576d50bf6fda8947f964994ceb4b6b1e717bfbd93538e8a379c51fc889a
+ok - absent recovery classification preserved the sentinel and enforced the expected authority
