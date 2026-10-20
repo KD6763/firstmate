@@ -408,12 +408,12 @@ fm_backend_agent_authority_target_of_meta() {  # <meta-file>
   if [ "$(fm_backend_of_meta "$meta")" = tmux ]; then
     pane_count=$(grep -c '^tmux_pane_id=' "$meta" 2>/dev/null || true)
     if [ "$pane_count" -eq 0 ]; then
-      echo "error: task has no recorded agent pane; relaunch it to bind one" >&2
+      echo "error: task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" >&2
       return 1
     fi
     if [ "$pane_count" -eq 1 ]; then
       fm_backend_meta_exact_value "$meta" tmux_pane_id >/dev/null 2>&1 || {
-        echo "error: task has no recorded agent pane; relaunch it to bind one" >&2
+        echo "error: task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" >&2
         return 1
       }
     fi

@@ -10,6 +10,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/tmux-fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-branch-supervision)
 fm_git_identity fmtest fmtest@example.invalid
@@ -888,10 +890,11 @@ test_unmarked_main_honors_a_live_branch_lease() {
   fakebin="$TMP_ROOT/unmarked-main-bin"
   mkdir -p "$home/state" "$fakebin"
   printf '%s\n' "$$" > "$home/state/.lock"
-  fm_write_meta "$home/state/task-held.meta" "window=fm-task-held" "backend=tmux" "harness=claude"
+  fm_write_tmux_meta "$home/state/task-held.meta" "window=firstmate:fm-task-held" "backend=tmux" "harness=claude"
   # A delivery that got past the guard would reach tmux; record it instead.
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexit 1\n' "$home/tmux-calls" > "$fakebin/tmux"
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux" meta-inventory
 
   env -u PI_CODING_AGENT FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_LEASE_HOLDER_PID=$$ \
     "$ROOT/bin/fm-lease.sh" claim task-held --actor branch || fail "the branch process could not claim its lease"
@@ -1376,8 +1379,8 @@ test_away_record_relocates_main_owned_actions_to_the_branch() {
   # task record against a cap of 2, then a second ordinary record refuses.
   # An arbitrary id is not already-queued work, so the branch is refused at
   # that gate rather than proceeding to ordinary validation.
-  fm_write_meta "$home/state/task-a.meta" "window=fm-task-a" "kind=ship"
-  fm_write_meta "$home/state/mate-1.meta" "window=remote:mate-1" "kind=secondmate"
+  fm_write_tmux_meta "$home/state/task-a.meta" "window=fm-task-a" "kind=ship"
+  fm_write_tmux_meta "$home/state/mate-1.meta" "window=remote:mate-1" "kind=secondmate"
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_SUPERVISION_ACTOR=branch \
     "$ROOT/bin/fm-spawn.sh" task-new --mode no-mistakes --yolo off 2>&1)
   status=$?
@@ -1385,7 +1388,7 @@ test_away_record_relocates_main_owned_actions_to_the_branch() {
   assert_contains "$out" "main is parked" "the spawn relocation did not announce itself"
   assert_contains "$out" "queued unblocked work" "an arbitrary branch spawn was not held to queued work"
   assert_not_contains "$out" "caps concurrent workers" "one ordinary task under a cap of 2 was refused"
-  fm_write_meta "$home/state/task-b.meta" "window=fm-task-b" "kind=ship"
+  fm_write_tmux_meta "$home/state/task-b.meta" "window=fm-task-b" "kind=ship"
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_SUPERVISION_ACTOR=branch \
     "$ROOT/bin/fm-spawn.sh" task-new --mode no-mistakes --yolo off 2>&1)
   status=$?
@@ -1546,8 +1549,8 @@ test_quiet_record_never_caps_a_present_captains_spawn() {
   git init -q -b main "$root"
   git -C "$root" commit -q --allow-empty -m init
   FM_AFK_MODE=quiet FM_HOME="$home" "$ROOT/bin/fm-afk-contract.sh" enter --spend 1 >/dev/null || fail "quiet entry failed"
-  fm_write_meta "$home/state/task-a.meta" "window=fm-task-a" "kind=ship"
-  fm_write_meta "$home/state/task-b.meta" "window=fm-task-b" "kind=ship"
+  fm_write_tmux_meta "$home/state/task-a.meta" "window=fm-task-a" "kind=ship"
+  fm_write_tmux_meta "$home/state/task-b.meta" "window=fm-task-b" "kind=ship"
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$ROOT/bin/fm-spawn.sh" task-new --mode no-mistakes --yolo off 2>&1)
   assert_not_contains "$out" "caps concurrent workers" "a quiet record capped a present captain's spawn"
   FM_HOME="$home" "$ROOT/bin/fm-afk-contract.sh" enter --spend 1 >/dev/null 2>&1 || fail "away entry over quiet failed"
@@ -1601,7 +1604,7 @@ WRAPPER
     [ "$i" -lt 200 ] || fail "spawn never reached the early spend-cap check: $(cat "$home/q1.out" 2>/dev/null || true)"
     sleep 0.05
   done
-  fm_write_meta "$home/state/task-live.meta" "window=fm-task-live" "kind=ship"
+  fm_write_tmux_meta "$home/state/task-live.meta" "window=fm-task-live" "kind=ship"
   : > "$home/competitor-published"
   wait || true
   out=$(cat "$home/q1.out" 2>/dev/null || true)

@@ -704,6 +704,7 @@ case "${1:-}" in
 esac
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   "$ROOT/bin/fm-busy-event.sh" arm "$state" mate >/dev/null \
     || fail "could not arm the mate's busy contract"
 
@@ -766,6 +767,7 @@ case "${1:-}" in
 esac
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   "$ROOT/bin/fm-busy-event.sh" arm "$state" mate >/dev/null \
     || fail "could not arm the mate's busy contract"
   # Backdate AFTER arming, so nothing the arm writes refreshes the launch record
@@ -832,6 +834,7 @@ case "${1:-}" in
 esac
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
 }
 
 install_secondmate_stall_date() {  # <fakebin>
@@ -955,6 +958,7 @@ fi
 exec "$(dirname "$0")/tmux-alive" "$@"
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   mkfifo "$fifo"
   ( exec 3> "$fifo"; : > "$dir/capture-blocked"; exec sleep 30 ) &
   holder=$!
@@ -1142,6 +1146,7 @@ case "${1:-}" in
 esac
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
 
   PATH="$fakebin:$PATH" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
     FM_STATE_OVERRIDE="$state" FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 \
@@ -3031,6 +3036,7 @@ make_secondmate_liveness_case() {
   printf 'codex\n' > "$dir/config/crew-harness"
   printf 'window=firstmate:fm-sm1\nkind=secondmate\nharness=claude\nbackend=tmux\nhome=%s\n' \
     "$home" > "$dir/state/sm1.meta"
+  fm_test_bind_tmux_meta "$dir/state/sm1.meta"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -3082,6 +3088,7 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   make_fake_crew_state "$fakebin" >/dev/null
   printf '%s\n' "$dir"
 }
@@ -3194,6 +3201,7 @@ test_secondmate_liveness_tick_relaunches_every_dead_mate_before_waking() {
   printf 'charter\n' > "$home/data/charter.md"
   printf 'window=firstmate:fm-sm2\nkind=secondmate\nharness=claude\nbackend=tmux\nhome=%s\n' \
     "$home" > "$state/sm2.meta"
+  fm_test_bind_tmux_meta "$state/sm2.meta"
 
   run_liveness_leg "$dir" several FM_FAKE_WINDOW_GONE=1; pid=$LIVENESS_PID
   wait_for_exit "$pid" 300 || fail "the watcher did not exit on its auto-relaunch wake"
@@ -3395,6 +3403,7 @@ test_secondmate_liveness_tick_error_keeps_scanning_and_wakes() {
   printf 'charter\n' > "$home/data/charter.md"
   printf 'window=firstmate:fm-sm2\nkind=secondmate\nharness=claude\nbackend=tmux\nhome=%s\n' \
     "$home" > "$state/sm2.meta"
+  fm_test_bind_tmux_meta "$state/sm2.meta"
   : > "$state/.secondmate-relaunch-sm1"
   chmod 000 "$state/.secondmate-relaunch-sm1"
 

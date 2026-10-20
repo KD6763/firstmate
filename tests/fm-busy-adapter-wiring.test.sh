@@ -476,16 +476,19 @@ case "\${1:-}" in
       prev=\$arg
     done
     case "\$format" in
+      '#{window_id}|#{window_index}|#{window_name}') printf '@1|0|%s\n' '${window#*:}' ;;
       '#{window_name}') printf '%s\n' '${window#*:}' ;;
       *) printf '%s\n' '$window' ;;
     esac
     ;;
+  list-panes) printf '%%1\n' ;;
   capture-pane) printf 'working\n' ;;
-  display-message) printf '0\n' ;;
+  display-message) case "\$*" in *'#{pane_id}'*) printf '%%1\n' ;; *) printf '0\n' ;; esac ;;
   *) exit 0 ;;
 esac
 SH
   chmod +x "$fakebin/tmux"
+
   PATH="$fakebin:$PATH" FM_HOME="$primary" FM_ROOT_OVERRIDE="$ROOT" \
     FM_STATE_OVERRIDE="$state" FM_BACKEND=tmux \
     FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 \

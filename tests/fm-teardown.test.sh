@@ -1887,7 +1887,7 @@ test_legacy_record_authority_uses_the_agent_pane() {
   rc=0
   run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   assert_legacy_endpoint_refusal "$case_dir" legacy-moved-live "$before" "$rc"
-  grep -Fq 'task has no recorded agent pane; relaunch it to bind one' "$case_dir/stderr" \
+  grep -Fq 'for unbound tmux records close the exact recorded window' "$case_dir/stderr" \
     || fail "legacy-moved-live: refusal did not explain how to establish authority"
   [ "$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')" = "$monitor_pane" ] \
     || fail "legacy-moved-live: refusal did not preserve the surviving monitor"
@@ -1903,7 +1903,7 @@ test_legacy_record_authority_uses_the_agent_pane() {
   rc=0
   run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   assert_legacy_endpoint_refusal "$case_dir" legacy-single-live "$before" "$rc"
-  grep -Fq 'task has no recorded agent pane; relaunch it to bind one' "$case_dir/stderr" \
+  grep -Fq 'for unbound tmux records close the exact recorded window' "$case_dir/stderr" \
     || fail "legacy-single-live: refusal did not explain how to establish authority"
   kill -0 "$agent_pid" 2>/dev/null || fail "legacy-single-live: refusal terminated the live agent"
   "$case_dir/fakebin/tmux" kill-server
@@ -1915,8 +1915,22 @@ test_legacy_record_authority_uses_the_agent_pane() {
   rc=0
   run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   assert_legacy_endpoint_refusal "$case_dir" legacy-single-dead "$before" "$rc"
-  grep -Fq 'task has no recorded agent pane; relaunch it to bind one' "$case_dir/stderr" \
+  grep -Fq 'for unbound tmux records close the exact recorded window' "$case_dir/stderr" \
     || fail "legacy-single-dead: refusal did not explain how to establish authority"
+  "$case_dir/fakebin/tmux" kill-server
+
+  case_dir=$(make_case legacy-unbound-retired)
+  prepare_landed_legacy_tmux_case "$case_dir"
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
+  "$case_dir/fakebin/tmux" new-window -d -t firstmate: -n neighbor
+  "$case_dir/fakebin/tmux" kill-window -t '=firstmate:=fm-task-x1'
+  out=$(run_teardown "$case_dir" --legacy-record) \
+    || fail "legacy-unbound-retired: closed unbound window could not be retired"
+  assert_absent "$case_dir/state/task-x1.meta" "legacy-unbound-retired: record survived"
+  [ "$(backlog_row_state "$case_dir")" = "done" ] \
+    || fail "legacy-unbound-retired: backlog did not close"
+  "$case_dir/fakebin/tmux" has-session -t firstmate \
+    || fail "legacy-unbound-retired: retirement closed the neighboring window"
   "$case_dir/fakebin/tmux" kill-server
 
   case_dir=$(make_case legacy-pane-missing)

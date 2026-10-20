@@ -12,6 +12,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/tmux-fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 
 # bin/fm-harness.sh checks verified ENV markers before ancestry. Muse is
 # markerless, so an inherited Cursor/Claude/Pi/Grok marker would outrank the
@@ -122,6 +124,7 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   cp "$(command -v bash)" "$fakebin/muse-bin-test-version"
   cat > "$fakebin/muse" <<'SH'
 #!/usr/bin/env bash
@@ -488,8 +491,8 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
-  fm_write_meta "$home/state/$id.meta" \
-    "window=fm-send:0" "endpoint_task_id=$id" "worktree=$case_dir" \
+  fm_write_tmux_meta "$home/state/$id.meta" \
+    "window=fm-send:0" "tmux_pane_id=%0" "endpoint_task_id=$id" "worktree=$case_dir" \
     "project=$case_dir" "harness=$harness" "kind=ship" "mode=no-mistakes" "yolo=off"
   printf '%s\n' "$case_dir|$home|$fakebin|$id"
 }
@@ -546,7 +549,7 @@ $rec
 EOF
   keylog="$case_dir/keys.log"
   : > "$keylog"
-  out=$(FM_FAKE_KEY_FAIL='-t fm-send:0 C-u' run_send_key "$home" "$fakebin" "$id" Escape "$keylog")
+  out=$(FM_FAKE_KEY_FAIL='-t %0 C-u' run_send_key "$home" "$fakebin" "$id" Escape "$keylog")
   status=$?
   [ "$status" -ne 0 ] || fail "a failed muse composer clear was reported as success"
   assert_contains "$out" "could not be cleared" "the failed clear did not explain the pane state"

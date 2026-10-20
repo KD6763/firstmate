@@ -14,6 +14,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/tmux-fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 
 unset TASKS_AXI_BACKEND || :
 
@@ -128,6 +130,7 @@ printf 'treehouse %s\n' "$*" >> "$FM_FAKE_CALL_LOG"
 exit 0
 SH
   chmod +x "$fakebin/tmux" "$fakebin/treehouse"
+  fm_test_tmux_protocol "$fakebin/tmux"
   fm_fake_exit0 "$fakebin" gh gh-axi no-mistakes
   fm_git_init_commit "$case_dir/project"
   fm_git_add_origin "$case_dir/project" "$case_dir/project.origin.git"
@@ -158,7 +161,7 @@ declare_capacity() {  # <home> <line>...
 write_live() {  # <home> <id> <project-dir> [extra-line...]
   local home=$1 id=$2 project=$3
   shift 3
-  fm_write_meta "$home/state/$id.meta" \
+  fm_write_tmux_meta "$home/state/$id.meta" \
     "window=firstmate:fm-$id" \
     "endpoint_task_id=$id" \
     "worktree=$home/absent-worktree-$id" \
@@ -343,7 +346,7 @@ test_restart_does_not_count_its_own_record() {
   case_dir=$(make_case restart task-c task-d)
   home="$case_dir/home"
   declare_capacity "$home" "project 1"
-  fm_write_meta "$home/state/task-c.meta" \
+  fm_write_tmux_meta "$home/state/task-c.meta" \
     "window=firstmate:fm-task-c" \
     "project=$case_dir/project" \
     "kind=ship"
@@ -402,9 +405,9 @@ test_occupancy_counts_only_this_projects_workers() {
   declare_capacity "$home" "project 3"
   write_live "$home" scout-a "$case_dir/project"
   sed -i.bak 's/^kind=ship$/kind=scout/' "$home/state/scout-a.meta" && rm -f "$home/state/scout-a.meta.bak"
-  fm_write_meta "$home/state/legacy-b.meta" "window=firstmate:fm-legacy-b" "project=$case_dir/project"
+  fm_write_tmux_meta "$home/state/legacy-b.meta" "window=firstmate:fm-legacy-b" "project=$case_dir/project"
   write_live "$home" other-c "$case_dir/other-project"
-  fm_write_meta "$home/state/mate-d.meta" "window=remote:mate-d" "project=$case_dir/project" "kind=secondmate"
+  fm_write_tmux_meta "$home/state/mate-d.meta" "window=remote:mate-d" "project=$case_dir/project" "kind=secondmate"
   out=$(spawn_ship "$case_dir" task-c) || rc=$?
   expect_code 0 "$rc" "records outside this project's workers took a place: $out"
   rc=0
@@ -434,7 +437,7 @@ test_capacity_is_shared_by_every_local_home() {
   printf -- '- far - a remote mate (host: far.example; root: /srv/fm; home: %s/remote-home; scope: other; projects: project; added 2026-09-01)\n' "$case_dir" \
     >> "$root/data/secondmates.md"
   mkdir -p "$case_dir/remote-home/state"
-  fm_write_meta "$case_dir/remote-home/state/far-x.meta" "window=w" "project=$case_dir/project" "kind=ship"
+  fm_write_tmux_meta "$case_dir/remote-home/state/far-x.meta" "window=w" "project=$case_dir/project" "kind=ship"
   declare_capacity "$root" "project 1"
   write_live "$root" live-a "$case_dir/project"
   git -C "$mate_project" worktree add --quiet -b wt-m "$case_dir/wt-m"

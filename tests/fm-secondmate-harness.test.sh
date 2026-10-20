@@ -46,6 +46,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/tmux-fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-ff-lib.sh"
 # shellcheck source=/dev/null
@@ -489,6 +491,7 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   # BASE_PATH deliberately omits the developer's node, which the trust
   # registration below needs, so link the real one in rather than presenting a
   # node-less spawn host no real fleet member looks like.
@@ -749,6 +752,7 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   fm_fake_exit0 "$fakebin" pi
   # BASE_PATH deliberately omits the developer's node, which the trust
   # registration below needs, so link the real one in rather than presenting a
@@ -1015,7 +1019,7 @@ test_spawned_secondmate_uses_its_harness_supervision_model() {
     printf '%s\n' "$harness" > "$w/home/config/secondmate-harness"
     make_seeded_home "$sm" sm
     spawn_secondmate_capture "$w" sm "$sm" "$launchlog" >/dev/null 2>&1
-    fm_write_meta "$sm/state/task.meta" "window=firstmate:fm-task" "kind=ship"
+    fm_write_tmux_meta "$sm/state/task.meta" "window=firstmate:fm-task" "kind=ship"
     touch "$sm/state/.last-watcher-beat"
     fakebin="$w/tmux-sm/fakebin"
     # Point the guard at the fixture home, not at whatever checkout this suite
@@ -1155,6 +1159,7 @@ add_sm_worktree() {
     printf 'kind=secondmate\n'
     printf 'home=%s/%s\n' "$w" "$id"
   } > "$w/home/state/$id.meta"
+  fm_test_bind_tmux_meta "$w/home/state/$id.meta"
 }
 
 make_fake_toolchain() {
@@ -1200,6 +1205,7 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -2351,6 +2357,7 @@ esac
 exec "$fakebin/tmux.real" "\$@"
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
 
   first_out="$w/first-push.out"
   (
@@ -2501,6 +2508,7 @@ esac
 exec "$fakebin/tmux.real" "\$@"
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   report="$w/empty-reread.report"
   : > "$report"
   log="$w/config-reread-order.tmux.log"
@@ -2681,6 +2689,7 @@ case "\$*" in
 esac
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux" meta-inventory
   PATH="$fakebin:$BASE_PATH" FM_HOME="$w/home" FM_ROOT_OVERRIDE="$w/main" \
     FM_SEND_SETTLE=0 FM_FAKE_TMUX_LOG="$log" \
     "$ROOT/bin/fm-bootstrap.sh" >/dev/null 2>&1

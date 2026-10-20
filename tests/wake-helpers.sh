@@ -6,6 +6,8 @@
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/tmux-fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 
 # fm-wake-drain.sh now calls fm-guard.sh to assert watcher liveness on every
 # drain. fm-guard.sh's first check warns when the firstmate PRIMARY checkout
@@ -206,6 +208,7 @@ make_supercase() {
 #!/usr/bin/env bash
 set -u
 case "${1:-}" in
+  list-panes) printf '%%1\n'; exit 0 ;;
   display-message)
     [ "${FM_FAKE_TMUX_PANE_ALIVE:-1}" = "1" ] || exit 1
     _print=0
@@ -214,7 +217,7 @@ case "${1:-}" in
       case "$_a" in *cursor_y*) printf '%s\n' "${FM_FAKE_TMUX_CURSOR_Y:-0}"; exit 0 ;; esac
       [ "$_a" = "-p" ] && _print=1
     done
-    [ "$_print" = 1 ] && printf 'fakepane\n'
+    [ "$_print" = 1 ] && printf '%%1\n'
     exit 0 ;;
   list-windows)
     _window=${FM_FAKE_TMUX_WINDOW:-firstmate:supervisor}
@@ -307,11 +310,12 @@ write_composer() {
   printf '╭%s╮\n│ > %s │\n╰%s╯\n' "$border" "$text" "$border" > "$COMPOSER"
 }
 case "${1:-}" in
+  list-panes) printf '%%1\n'; exit 0 ;;
   display-message)
     print=0
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     for a in "$@"; do [ "$a" = "-p" ] && print=1; done
-    [ "$print" = 1 ] && printf 'fakepane\n'
+    [ "$print" = 1 ] && printf '%%1\n'
     exit 0 ;;
   capture-pane) cat "$COMPOSER" 2>/dev/null; exit 0 ;;
   list-windows)

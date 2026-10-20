@@ -26,6 +26,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/tmux-fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 
 RESTART="$ROOT/bin/fm-secondmate-restart.sh"
 
@@ -122,6 +124,7 @@ esac
 exit 0
 SH
   chmod +x "$fb/tmux"
+  fm_test_tmux_protocol "$fb/tmux"
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -172,6 +175,7 @@ add_local_mate() {
     echo "home=$smhome"
     [ -z "$backend" ] || echo "backend=$backend"
   } > "$home/state/$id.meta"
+  fm_test_bind_tmux_meta "$home/state/$id.meta"
   printf '%s\n' "fm-$id" >> "$dir/fake/windows"
   printf '%s' "$smhome" > "$dir/fake/cwd"
 }
@@ -221,6 +225,7 @@ add_repo_backed_mate() {  # <case-dir> <id> [harness] [backend]
     echo "home=$smhome"
     [ -z "$backend" ] || echo "backend=$backend"
   } > "$home/state/$id.meta"
+  fm_test_bind_tmux_meta "$home/state/$id.meta"
   printf '%s\n' "fm-$id" >> "$dir/fake/windows"
   printf '%s' "$smhome" > "$dir/fake/cwd"
 }
@@ -449,6 +454,7 @@ setup_remote_case() {  # <case-dir> <id> <ssh-mode>
     echo "remote_backend=herdr"
     echo "remote_target=fm-remote:2ndmate-$id"
   } > "$dir/home/state/$id.meta"
+  fm_test_bind_tmux_meta "$dir/home/state/$id.meta"
   printf -- '- %s - remote domain (host: remote-mac; root: /srv/fm; home: /srv/%s; scope: things; projects: p; added 2026-09-03)\n' \
     "$id" "$id" > "$dir/home/data/secondmates.md"
   cat > "$fb/fake-ssh" <<'SH'

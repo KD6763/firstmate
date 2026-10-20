@@ -204,7 +204,12 @@
 #   --legacy-record accepts a task record that predates the spawn_gen field:
 #   teardown then proceeds only when the recorded endpoint is confirmed dead or
 #   agent-less (bin/fm-backend.sh's recovery-grade classifier), and without
-#   --force the worktree still passes the ordinary landed-work checks. The
+#   --force the worktree still passes the ordinary landed-work checks.
+#   An attended --legacy-record retirement of a tmux record that also lacks
+#   tmux_pane_id requires its exact recorded window to be absent: first finish
+#   or exit the task in its own terminal and close that window after preserving
+#   its work. A surviving window, even with one idle shell, is not agent proof.
+#   No pane is adopted or recorded by this path. The
 #   accepted legacy incarnation is stamped into the record before its close is
 #   recorded and named in the teardown line; the flag never relaxes the
 #   unlanded-work refusal, which --force alone can authorize. A legacy- stamp
@@ -621,7 +626,7 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
       # or agent-less before any cleanup decision is made.
       TEARDOWN_LEGACY_PENDING=1
     elif [ "$TEARDOWN_LEGACY_GEN_COUNT" = 0 ]; then
-      echo "error: task $ID's record has no spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - relaunch the task to publish an unambiguous incarnation, then retry teardown, or pass --legacy-record once its recorded endpoint is confirmed dead or agent-less" >&2
+      echo "error: task $ID's record has no spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - finish or retire the task from its own terminal, then pass --legacy-record after its recorded endpoint is confirmed dead or absent (unbound tmux records require the window to be closed)" >&2
       exit 1
     else
       echo "error: task $ID's record has an unreadable spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - fix the record, then retry teardown" >&2
@@ -640,7 +645,7 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
         if [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
           TEARDOWN_WINDOWLESS=1
         elif [ "$LEGACY_RECORD_GIVEN" != 1 ]; then
-          echo "error: task $ID's record carries the legacy incarnation stamp $FM_BACKLOG_META_SPAWN_GEN left by an abandoned --legacy-record teardown, not an incarnation published by a spawn; refusing automatic teardown - relaunch the task to publish an unambiguous incarnation, then retry teardown, or pass --legacy-record once its recorded endpoint is confirmed dead or agent-less" >&2
+          echo "error: task $ID's record carries the legacy incarnation stamp $FM_BACKLOG_META_SPAWN_GEN left by an abandoned --legacy-record teardown, not an incarnation published by a spawn; refusing automatic teardown - finish or retire the task from its own terminal, then pass --legacy-record after its recorded endpoint is confirmed dead or absent (unbound tmux records require the window to be closed)" >&2
           exit 1
         fi
         TEARDOWN_LEGACY_PENDING=1
@@ -1209,8 +1214,21 @@ if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
     TEARDOWN_LEGACY_ENDPOINT=missing
   else
     TEARDOWN_LEGACY_IO_STATUS=0
-    TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$META") \
-      || TEARDOWN_LEGACY_IO_STATUS=$?
+    if [ "$LEGACY_RECORD_GIVEN" = 1 ] && [ "$BACKEND" = tmux ] \
+       && ! grep -q '^tmux_pane_id=' "$META"; then
+      # Attended retirement only, never recovery/adoption: endpoint validation
+      # above already binds T to this task. Refuse any surviving exact window,
+      # even if its sole pane now looks like a shell or a monitor.
+      fm_backend_source tmux || exit 1
+      TEARDOWN_LEGACY_IO_STATUS=1
+      TEARDOWN_LEGACY_WINDOW_STATUS=0
+      fm_backend_tmux_window_id "${T%%:*}" "${T#*:}" >/dev/null \
+        || TEARDOWN_LEGACY_WINDOW_STATUS=$?
+      [ "$TEARDOWN_LEGACY_WINDOW_STATUS" -ne 2 ] || TEARDOWN_LEGACY_IO_STATUS=2
+    else
+      TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$META") \
+        || TEARDOWN_LEGACY_IO_STATUS=$?
+    fi
     case "$TEARDOWN_LEGACY_IO_STATUS" in
       0) TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$TEARDOWN_LEGACY_IO_TARGET") ;;
       2) TEARDOWN_LEGACY_ENDPOINT=missing ;;
@@ -1220,7 +1238,7 @@ if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
       dead|missing) ;;
       *)
         echo "REFUSED: task $ID's record predates spawn_gen and its recorded endpoint reads '$TEARDOWN_LEGACY_ENDPOINT', not confidently dead or agent-less; --legacy-record teardown is refused while an agent may still be bound to it. Nothing was changed." >&2
-        echo "Reconcile the endpoint first (bin/fm-crew-state.sh $ID), or relaunch the task to publish an unambiguous incarnation, then retry teardown." >&2
+        echo "Finish or exit the task from its own terminal and preserve its work; for unbound tmux records close the exact recorded window, then retry --legacy-record (docs/agent-control.md#upgrading-unbound-tmux-tasks)." >&2
         exit 1
         ;;
     esac

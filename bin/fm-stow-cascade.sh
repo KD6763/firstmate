@@ -131,7 +131,7 @@ resolve_local_transport() { # <id> <resolved-home>
   fi
   if [ "$target_rc" -ne 0 ]; then
     if [ "$backend" = tmux ] && ! grep -Eq '^tmux_pane_id=.+$' "$meta" 2>/dev/null; then
-      set_transport unavailable 'task has no recorded agent pane; relaunch it to bind one'
+      set_transport unavailable 'task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)'
     else
       set_transport unavailable 'recorded agent endpoint is unreadable'
     fi

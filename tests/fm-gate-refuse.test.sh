@@ -267,6 +267,7 @@ test_lab_home_private_tmux_socket_survives_deep_paths() {
   mkdir -p "$TMP/failing-tmux-bin"
   printf '#!/bin/sh\necho "tmux: probe failed" >&2\nexit 1\n' > "$TMP/failing-tmux-bin/tmux"
   chmod +x "$TMP/failing-tmux-bin/tmux"
+  fm_test_tmux_protocol "$TMP/failing-tmux-bin/tmux" meta-inventory
   if PATH="$TMP/failing-tmux-bin:$PATH" "$LABHOME" teardown "$lab" >/dev/null 2>&1; then
     fail "lab teardown removed the directory when its tmux probe failed"
   fi
@@ -387,6 +388,7 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux" meta-inventory
   printf '#!/usr/bin/env bash\nexit 0\n' > "$fakebin/sleep"
   chmod +x "$fakebin/sleep"
   printf '%s\n' "$fakebin"
@@ -406,7 +408,7 @@ test_send_refuses_and_admits() {
   home="$TMP/send-home"; mkdir -p "$home/state"
   fakebin=$(make_send_fakebin "$TMP/send-fake")
   log="$TMP/send-tmux.log"
-  fm_write_meta "$home/state/lane-ok.meta" "window=sess:fm-lane-ok" "kind=ship" "harness=codex"
+  fm_write_tmux_meta "$home/state/lane-ok.meta" "window=sess:fm-lane-ok" "kind=ship" "harness=codex"
 
   # env-marker refuse.
   : > "$log"
@@ -479,7 +481,7 @@ SH
   git -C "$case_dir/wt" commit -q --allow-empty -m "shippable work"
   git -C "$case_dir/wt" push -q origin fm/task-x1
   git -C "$case_dir/project" fetch -q origin
-  fm_write_meta "$case_dir/state/task-x1.meta" \
+  fm_write_tmux_meta "$case_dir/state/task-x1.meta" \
     "window=firstmate:fm-task-x1" "endpoint_task_id=task-x1" \
     "worktree=$case_dir/wt" "project=$case_dir/project" \
     "kind=ship" "mode=no-mistakes" "spawn_gen=spawn-gate-refuse-task-x1"

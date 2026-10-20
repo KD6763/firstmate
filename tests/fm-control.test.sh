@@ -850,12 +850,12 @@ test_unbound_legacy_endpoint_grants_no_control_authority() {
 
   out=$(run_control "$dir" t1 interrupt); rc=$?
   expect_code 1 "$rc" "an unbound legacy endpoint must not authorize interrupt"
-  assert_contains "$out" "task has no recorded agent pane; relaunch it to bind one" \
+  assert_contains "$out" "task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" \
     "interrupt did not explain how to establish control authority"
 
   out=$(run_control "$dir" t1 exit); rc=$?
   expect_code 1 "$rc" "an unbound legacy endpoint must not authorize exit"
-  assert_contains "$out" "task has no recorded agent pane; relaunch it to bind one" \
+  assert_contains "$out" "task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" \
     "exit did not explain how to establish control authority"
   [ ! -s "$dir/fake/keys" ] || fail "an unbound control refusal still sent a key"
   [ ! -s "$dir/fake/literal" ] || fail "an unbound control refusal still typed text"

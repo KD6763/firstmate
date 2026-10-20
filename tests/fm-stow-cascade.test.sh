@@ -275,7 +275,7 @@ test_unbound_legacy_home_never_selects_direct_mutation() {
   s=$(stanza "$out" legacy-local)
   [ "$(value_in "$s" transport)" = unavailable ] \
     || fail "an unbound legacy home selected $(value_in "$s" transport) instead of unavailable"
-  assert_contains "$s" 'task has no recorded agent pane; relaunch it to bind one' \
+  assert_contains "$s" 'task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)' \
     "the stow refusal did not explain how to establish authority"
   pass "an unbound legacy home never grants direct mutation authority"
 }

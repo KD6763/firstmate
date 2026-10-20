@@ -176,6 +176,18 @@ The worktree and the task's records are unaffected either way.
   An `alive`, `ambiguous`, or `unreadable` verdict all refuse, and so does any endpoint whose absence is not provable, which on tmux is every `missing`; absence is claimed only from positive evidence of it.
   It also requires the shell to be in the recorded worktree: every backend but Orca (which owns its own task worktree with no current-path probe) gets one explicit `cd` to the recorded path, then a pre-launch path read that refuses before any harness starts unless it confirms the endpoint is sitting in the recorded copy.
 
+## Upgrading unbound tmux tasks
+
+An in-flight tmux task created before pane binding has no recorded `tmux_pane_id`.
+It must finish or be retired and freshly spawned; `fm-control relaunch` and automatic secondmate recovery cannot establish its agent identity.
+A single surviving pane is insufficient proof because the agent could have moved while a monitor remained.
+
+Continue or exit the agent from its own terminal, preserving its work and any required report or handoff before closing the exact recorded task window.
+Then run `bin/fm-teardown.sh <task-id>` from the owning home on that same tmux server and use the normal fresh-spawn path with the retained brief.
+If the record also lacks `spawn_gen`, use the attended `bin/fm-teardown.sh <task-id> --legacy-record` retirement after closing that window; the flag's endpoint and landed-work gates are owned by the teardown header.
+A refused teardown leaves the record and work in place: satisfy the reported landed-work or completion requirement before retrying, without adding a pane id by hand or using `--force` to bypass preservation.
+Secondmate retirement also requires its child tasks and outstanding replies to be resolved under the normal teardown contract.
+
 ## Capability matrix
 
 Backend capability comes from each adapter's real surface, not from a policy choice.

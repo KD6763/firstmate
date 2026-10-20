@@ -256,7 +256,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
       ;;
     unreadable)
       if [ "$backend" = tmux ] && ! grep -Eq '^tmux_pane_id=.+$' "$meta" 2>/dev/null; then
-        FM_SM_LIVE_REASON="task has no recorded agent pane; relaunch it to bind one"
+        FM_SM_LIVE_REASON="task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)"
       else
         FM_SM_LIVE_REASON="endpoint probe unreadable (backend=$backend)"
       fi

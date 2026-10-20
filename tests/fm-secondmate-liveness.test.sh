@@ -436,7 +436,7 @@ test_sweep_refuses_an_unbound_legacy_secondmate() {
 
   out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" zsh "$log")
 
-  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: skipped: task has no recorded agent pane; relaunch it to bind one" \
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: skipped: task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" \
     "an unbound legacy secondmate did not report the authority refusal"
   [ ! -s "$log" ] || fail "an unbound legacy secondmate was killed or relaunched: $(cat "$log")"
   pass "sweep: an unbound legacy secondmate cannot authorize recovery"

@@ -37,6 +37,7 @@ spawn_gen=spawn-$id
 home=$abs
 worktree=$abs
 META
+  fm_test_bind_tmux_meta "$home/state/$id.meta"
   fakebin=$(make_fake_tmux "$TMP_ROOT/$1-fake")
   printf '%s\n' "$home" "$mate" "$fakebin"
 }
@@ -170,7 +171,7 @@ run_notify() {  # <home> <fakebin> <name> <snapshot> [extra args...]
   shift 4
   PATH="$fakebin:$PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
     FM_STATE_OVERRIDE="$home/state" \
-    FM_FAKE_TMUX_WINDOW="firstmate:fm-mate" \
+    FM_FAKE_TMUX_WINDOW="${FM_TEST_RECONCILE_WINDOWS:-firstmate:fm-mate}" \
     FM_FAKE_TMUX_LOG="$TMP_ROOT/$name-tmux.log" \
     FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/$name-fake/pane.txt" \
     "$RECONCILE" notify --snapshot "$snap" "$@"
@@ -308,11 +309,13 @@ SH
 }
 
 test_each_home_carries_its_own_cooldown() {
+  local FM_TEST_RECONCILE_WINDOWS=$'firstmate:fm-mate\nfirstmate:fm-other'
   local home mate fakebin snap out
   { read -r home; read -r mate; read -r fakebin; } < <(make_main_home perhome mate)
   # A second registered mate in the same home, so one nudge cannot silence the other.
   cp "$home/state/mate.meta" "$home/state/other.meta"
-  sed -i.bak 's/fm-mate/fm-other/' "$home/state/other.meta" && rm -f "$home/state/other.meta.bak"
+  sed -i.bak -e 's/fm-mate/fm-other/' -e '/^tmux_pane_id=/d' "$home/state/other.meta" && rm -f "$home/state/other.meta.bak"
+  fm_test_bind_tmux_meta "$home/state/other.meta"
   snap="$home/snapshot.json"
   jq -n '{schema:"fm-fleet-snapshot.v1", generated:"2026-08-26T00:00:00Z",
     secondmate_current:{records:[
@@ -360,7 +363,7 @@ test_the_ask_never_arms_a_reply_expectation_or_a_re_ring() {
   # the same inbox, same grace, with an ordinary unhandled steer added.
   PATH="$fakebin:$PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
     FM_STATE_OVERRIDE="$home/state" \
-    FM_FAKE_TMUX_WINDOW="firstmate:fm-mate" \
+    FM_FAKE_TMUX_WINDOW="${FM_TEST_RECONCILE_WINDOWS:-firstmate:fm-mate}" \
     FM_FAKE_TMUX_LOG="$TMP_ROOT/fireforget-tmux.log" \
     FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/fireforget-fake/pane.txt" \
     "$ROOT/bin/fm-send.sh" mate "an ordinary steer that does expect handling" >/dev/null 2>&1 \

@@ -5,6 +5,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/tmux-fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
 TMP_ROOT=$(fm_test_tmproot fm-startup-memory-budget)
@@ -68,6 +70,7 @@ esac
 exit 0
 SH
   chmod +x "$fakebin"/*
+  fm_test_tmux_protocol "$fakebin/tmux"
   printf '%s\n' "$fakebin"
 }
 
@@ -226,6 +229,7 @@ new_propagation_world() {
     printf 'harness=codex\n'
     printf 'home=%s\n' "$sm"
   } > "$home/state/sm.meta"
+  fm_test_bind_tmux_meta "$home/state/sm.meta"
   printf '%s|%s|%s\n' "$root" "$home" "$sm"
 }
 

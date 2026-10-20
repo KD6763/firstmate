@@ -569,14 +569,14 @@ printf '%s\n' "$peek" | grep -q legacy-monitor-ready \
 authority_error=$(fm_backend_agent_authority_target_of_meta \
   "$PANE_HOME/state/legacy-moved.meta" 2>&1)
 [ "$?" = 1 ] || fail "an unbound moved-agent record granted lifecycle authority"
-printf '%s\n' "$authority_error" | grep -Fq 'task has no recorded agent pane; relaunch it to bind one' \
+printf '%s\n' "$authority_error" | grep -Fq 'task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)' \
   || fail "the strict target refusal was not actionable: $authority_error"
 probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
   . "$1"
   fm_secondmate_liveness_probe "$2" legacy-moved poll
   printf "%s|%s|%s|%s" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_KILL" "$FM_SM_LIVE_REASON"
 ' _ "$ROOT/bin/fm-secondmate-liveness-lib.sh" "$PANE_HOME/state/legacy-moved.meta")
-[ "$probe" = 'skipped|unreadable|0|task has no recorded agent pane; relaunch it to bind one' ] \
+[ "$probe" = 'skipped|unreadable|0|task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)' ] \
   || fail "legacy secondmate recovery gained authority from its surviving monitor: $probe"
 fm_backend_target_exists tmux "$LEGACY_LIVE_AGENT" \
   || fail "authority refusal did not preserve the moved live agent"

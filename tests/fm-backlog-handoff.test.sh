@@ -23,6 +23,7 @@ export FM_SEND_SETTLE=0 FM_SEND_SLEEP=0 FM_SEND_RETRIES=1
 
 setup_homes() {
   local home=$1 subhome=$2 id=${3:-design}
+  export FM_FAKE_TMUX_WINDOW="firstmate:fm-$id"
   mkdir -p "$home/data" "$home/state"
   seed_secondmate_home_marker "$subhome" "$id"
   local sub_abs
@@ -37,6 +38,7 @@ backend=tmux
 home=$sub_abs
 worktree=$sub_abs
 EOF
+  fm_test_bind_tmux_meta "$home/state/$id.meta"
 }
 
 inbox_body_stream() { # <state-dir> <task-id>
@@ -70,6 +72,7 @@ backend=tmux
 home=$sub
 worktree=$sub
 EOF
+  fm_test_bind_tmux_meta "$home/state/design.meta"
   cat > "$home/data/backlog.md" <<'EOF'
 ## Queued
 - [ ] wake-item - routed to a live receiver (repo: alpha)

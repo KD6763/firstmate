@@ -2052,13 +2052,13 @@ test_unbound_legacy_relaunch_refuses_before_any_authority_action() {
 
   out=$(run_spawn "$dir" rl76 --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "direct relaunch must refuse an unbound legacy task"
-  assert_contains "$out" "task has no recorded agent pane; relaunch it to bind one" \
+  assert_contains "$out" "task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" \
     "direct relaunch did not explain the missing authority binding"
   [ ! -s "$dir/fake/literal" ] || fail "direct relaunch sent input before refusing the unbound record"
 
   out=$(run_control "$dir" rl76 relaunch --note "must remain untouched"); rc=$?
   expect_code 1 "$rc" "control relaunch must refuse an unbound legacy task"
-  assert_contains "$out" "task has no recorded agent pane; relaunch it to bind one" \
+  assert_contains "$out" "task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" \
     "control relaunch did not explain the missing authority binding"
   [ ! -s "$dir/fake/literal" ] || fail "control relaunch stopped or launched an agent before refusing"
   [ "$(cksum "$dir/home/state/rl76.meta" "$dir/home/data/rl76/brief.md")" = "$before" ] \

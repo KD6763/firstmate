@@ -33,6 +33,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/tmux-fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$ROOT/bin/fm-pending-reply-lib.sh"
 # shellcheck source=bin/fm-marker-lib.sh
@@ -92,6 +94,7 @@ esac
 exit 0
 SH
   chmod +x "$fb/tmux"
+  fm_test_tmux_protocol "$fb/tmux"
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -156,7 +159,7 @@ setup_remote_secondmate_home() {  # <name> -> echoes remote home dir
   mkdir -p "$rh/state/parent-route" "$rh/bin"
   printf 'rsm\n' > "$rh/.fm-secondmate-home"
   printf '# remote secondmate home fixture\n' > "$rh/AGENTS.md"
-  fm_write_meta "$rh/state/parent-route/rsm.meta" \
+  fm_write_tmux_meta "$rh/state/parent-route/rsm.meta" \
     "window=fm-remote:p1" \
     "worktree=-" \
     "project=-" \
@@ -176,7 +179,7 @@ setup_remote_parent_home() {  # <name> <remote-home> -> echoes home dir
   local home
   home=$(setup_home "$1")
   mkdir -p "$home/data"
-  fm_write_meta "$home/state/rsm.meta" \
+  fm_write_tmux_meta "$home/state/rsm.meta" \
     "window=fm-remote:p1" \
     "endpoint_task_id=rsm" \
     "harness=claude" \
@@ -712,7 +715,7 @@ test_local_secondmate_pending_keeps_expectation_armed() {
   dir="$TMP_ROOT/local-pending-expectation"; mkdir -p "$dir"
   fb=$(make_stubs "$dir"); log="$dir/send.log"
   home=$(setup_home local-pending-expectation)
-  fm_write_meta "$home/state/lsm.meta" \
+  fm_write_tmux_meta "$home/state/lsm.meta" \
     "window=sess:fm-lsm" "harness=claude" "kind=secondmate" "mode=secondmate" "home=$home/sm"
 
   # A harness-native slash invocation keeps the typed plane for a LOCAL marked
@@ -765,7 +768,7 @@ test_local_pending_does_not_close_resolve_key() {
   dir="$TMP_ROOT/local-pending-key"; mkdir -p "$dir"
   fb=$(make_stubs "$dir"); log="$dir/send.log"
   home=$(setup_home local-pending-key)
-  fm_write_meta "$home/state/t2.meta" "window=sess:fm-t2" "kind=ship"
+  fm_write_tmux_meta "$home/state/t2.meta" "window=sess:fm-t2" "kind=ship"
   printf 'blocked [key=creds]: need the deploy token\n' > "$home/state/t2.status"
 
   # A harness-native slash answer keeps the typed plane, so the unconfirmed
