@@ -384,8 +384,10 @@ fm_backend_target_of_meta() {  # <meta-file>
 # that field retains its window-based I/O, including active-pane selection.
 # Other backends already record a pane/surface/terminal and remain unchanged.
 # A failed read is never permission to fall back to the active pane.
-# For tmux, status 2 proves the recorded endpoint is missing; status 1 leaves
-# membership unproven. Other backends retain their existing resolution status.
+# For tmux, status 2 proves the requested I/O binding is absent on the selected
+# server, not that the lifecycle window is missing; lifecycle callers check the
+# recorded window independently. Status 1 leaves membership unproven. Other
+# backends retain their existing resolution status.
 fm_backend_io_target_of_meta() {  # <meta-file>
   local meta=$1 window pane=
   if [ "$(fm_backend_of_meta "$meta")" != tmux ]; then
@@ -755,11 +757,13 @@ fm_backend_source() {  # <name>
   esac
 }
 
-# fm_backend_resolve_selector: resolve a raw fm-send.sh/fm-peek.sh style
-# selector to a live session-provider target. Four forms, in order:
+# fm_backend_resolve_selector: resolve a raw selector to a recorded lifecycle
+# target or an ad hoc session-provider target. Metadata-aware task I/O callers
+# resolve through fm_backend_io_target_of_meta first; this helper owns the
+# explicit and legacy fallback vocabulary below. Four forms, in order:
 #   target with ":"   used as-is (the escape hatch for a window/pane outside
 #                      this firstmate home) - backend-independent, a literal string.
-#   exact task id      routed through <state-dir>/<id>.meta's backend target
+#   exact task id      routed through <state-dir>/<id>.meta's lifecycle target
 #                      (`window=` normally, `terminal=` for Orca) -
 #                      backend-independent, a stored value, NOT re-verified
 #                      against a live backend inventory (matches today's

@@ -199,8 +199,10 @@ EOF
 # Fresh spawn resolves its initial pane once; bound task I/O passes its recorded
 # %id through every read, literal send and Enter retry independently of focus.
 # Unbound legacy task I/O bypasses this resolver and retains its window target.
-# Return 2 only for a proven missing endpoint; ambiguous, moved and unreadable
-# bindings return 1. Neither failure permits reading or sending to another pane.
+# Return 2 only when the requested I/O binding is provably absent on the
+# selected server; lifecycle callers must still check the recorded window.
+# Ambiguous, moved and unreadable bindings return 1. Neither failure permits
+# reading or sending to another pane.
 fm_backend_tmux_task_pane() {  # <session:window> [recorded-pane-id]
   local target=$1 pane=${2:-} session window wid panes rc all_panes
   case "$target" in

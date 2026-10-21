@@ -471,11 +471,11 @@ A backend spawn refusal from a missing dependency, version gate, or unauthentica
 
 ### Task metadata
 
-Task meta records `backend=` only for a non-default backend; an absent `backend=` means `tmux`, preserving existing default-path meta files.
+Task meta records `backend=` only for a non-default backend; an absent `backend=` means `tmux`, keeping backend selection compatible with existing default-path meta files.
 
 - Every new task records `endpoint_task_id=` as the cleanup binding between the metadata filename and its opaque runtime endpoint.
 
-- A tmux task additionally records `tmux_pane_id=` for task input, while `window=` remains its lifecycle target.
+- A freshly spawned tmux task additionally records `tmux_pane_id=` for task input, while `window=` remains its lifecycle target.
 
 - A herdr task additionally records `herdr_session=`, `herdr_workspace_id=`, `herdr_tab_id=`, and `herdr_pane_id=`.
 
@@ -488,7 +488,7 @@ Task meta records `backend=` only for a non-default backend; an absent `backend=
 
 ### Task selectors
 
-Task selectors share the metadata helpers in `bin/fm-backend.sh`; `fm_backend_resolve_selector` owns read resolution and the `fm-send.sh` header owns its stricter delivery resolution.
+Task selectors share the metadata helpers in `bin/fm-backend.sh`; `fm_backend_resolve_selector` owns explicit and legacy fallback resolution, and the `fm-send.sh` header owns its stricter delivery resolution.
 A selector containing `:` is an explicit backend endpoint escape hatch.
 
 Otherwise an exact task id matching `state/<id>.meta` wins before the legacy `fm-<id>` label fallback, so task ids that themselves start with `fm-` route to their own metadata instead of being stripped.
