@@ -754,13 +754,20 @@ task_window_harness() {  # <window> <state>
 # working: unknown semantic state never becomes busy and never becomes a
 # silent idle, so a stale pane whose state cannot be proven surfaces.
 stale_window_is_busy() {  # <window> <state>
-  local win=$1 state=$2 backend harness label task meta target target_rc=0 tail40 verdict
+  local win=$1 state=$2 backend harness label task meta target target_rc=0 window_rc=0 tail40 verdict
   backend=$(task_window_backend "$win" "$state")
   harness=$(task_window_harness "$win" "$state")
   task=$(window_to_task "$win" "$state")
   meta="$state/$task.meta"
   target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
   if [ "$target_rc" -ne 0 ]; then
+    if [ "$backend" = tmux ] && grep -q '^tmux_pane_id=' "$meta"; then
+      case "$win" in *:*:*|:*|*:) return 1 ;; *:*) ;; *) return 1 ;; esac
+      fm_backend_source tmux || return 1
+      fm_backend_tmux_window_id "${win%%:*}" "${win#*:}" >/dev/null 2>&1 || window_rc=$?
+      [ "$window_rc" -ne 2 ] || return 2
+      return 1
+    fi
     [ "$target_rc" -ne 2 ] || return 2
     return 1
   fi
