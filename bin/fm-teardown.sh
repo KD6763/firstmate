@@ -2282,23 +2282,47 @@ $dir_pids"
 
 reap_task_backend_process_group() {  # <label>
   local label=$1 leader leader_start pgid current_pgid own_pgid
+  local reap_target=$T target_status=0
   if [ "$BACKEND" != tmux ]; then
     echo "warning: lsof is unavailable; cannot resolve a process-group fallback for $BACKEND task $ID" >&2
     return 0
   fi
-  leader=$(tmux display-message -p -t "$T" '#{pane_pid}' 2>/dev/null) || leader=""
+  if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
+    reap_target=$(fm_backend_agent_authority_target_of_meta "$META") || target_status=$?
+    case "$target_status" in
+      0) ;;
+      2) return 0 ;;
+      *)
+        echo "REFUSED: task $ID's recorded agent pane is not verified before process-group cleanup; preserving the worktree and task state." >&2
+        return 1
+        ;;
+    esac
+  fi
+  leader=$(tmux display-message -p -t "$reap_target" '#{pane_pid}' 2>/dev/null) || leader=""
   case "$leader" in ''|*[!0-9]*)
+    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
+      echo "REFUSED: task $ID's recorded agent pane process could not be verified before process-group cleanup; preserving the worktree and task state." >&2
+      return 1
+    fi
     echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
     return 0
     ;;
   esac
   leader_start=$(task_process_identity "$leader") || {
+    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
+      echo "REFUSED: task $ID's recorded agent pane process identity could not be verified before process-group cleanup; preserving the worktree and task state." >&2
+      return 1
+    fi
     echo "warning: lsof is unavailable; cannot identify the tmux pane process group for $ID" >&2
     return 0
   }
   pgid=$(ps -o pgid= -p "$leader" 2>/dev/null) || pgid=""
   pgid=$(printf '%s' "$pgid" | tr -d '[:space:]')
   case "$pgid" in ''|*[!0-9]*|0|1)
+    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
+      echo "REFUSED: task $ID's recorded agent pane process group could not be verified before cleanup; preserving the worktree and task state." >&2
+      return 1
+    fi
     echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
     return 0
     ;;
@@ -2306,13 +2330,41 @@ reap_task_backend_process_group() {  # <label>
   own_pgid=$(ps -o pgid= -p "$$" 2>/dev/null) || own_pgid=""
   own_pgid=$(printf '%s' "$own_pgid" | tr -d '[:space:]')
   if [ "$pgid" = "$own_pgid" ]; then
+    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
+      echo "REFUSED: task $ID's recorded agent pane resolves to teardown's own process group; preserving the worktree and task state." >&2
+      return 1
+    fi
     echo "warning: lsof is unavailable; refusing to signal teardown's own process group for $ID" >&2
     return 0
   fi
-  task_process_identity_matches "$leader" "$leader_start" || return 0
+  if ! task_process_identity_matches "$leader" "$leader_start"; then
+    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
+      echo "REFUSED: task $ID's recorded agent pane process identity changed before process-group cleanup; preserving the worktree and task state." >&2
+      return 1
+    fi
+    return 0
+  fi
   current_pgid=$(ps -o pgid= -p "$leader" 2>/dev/null) || current_pgid=""
   current_pgid=$(printf '%s' "$current_pgid" | tr -d '[:space:]')
-  [ "$current_pgid" = "$pgid" ] || return 0
+  if [ "$current_pgid" != "$pgid" ]; then
+    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
+      echo "REFUSED: task $ID's recorded agent pane process group changed before cleanup; preserving the worktree and task state." >&2
+      return 1
+    fi
+    return 0
+  fi
+  if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
+    target_status=0
+    fm_backend_agent_authority_target_of_meta "$META" >/dev/null || target_status=$?
+    case "$target_status" in
+      0) ;;
+      2) return 0 ;;
+      *)
+        echo "REFUSED: task $ID's recorded agent pane is not verified before process-group cleanup; preserving the worktree and task state." >&2
+        return 1
+        ;;
+    esac
+  fi
   echo "teardown: reaping leaked $label process group for $ID: $pgid" >&2
   kill -TERM -- "-$pgid" 2>/dev/null || true
   sleep 1
@@ -2335,7 +2387,7 @@ reap_task_worktree_processes() {  # <label> <dir>...
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
   shift
   if ! command -v lsof >/dev/null 2>&1; then
-    reap_task_backend_process_group "$label"
+    reap_task_backend_process_group "$label" || return 1
     return 0
   fi
   while [ "$pass" -le "$max_passes" ]; do

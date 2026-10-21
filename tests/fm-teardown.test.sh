@@ -5094,6 +5094,106 @@ EOF
   pass "missing lsof falls back to reaping the tmux pane process group"
 }
 
+test_lsof_absent_reaps_only_bound_agent_pane() {
+  local case_dir rc agent_pane monitor_pane agent_pid monitor_pid path_without_lsof result
+  case_dir=$(make_case lsof-absent-bound-agent-reap)
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  add_private_tmux_socket "$case_dir"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  PATH="$path_without_lsof" command -v lsof >/dev/null 2>&1 \
+    && fail "lsof-absent-bound-agent-reap: fixture path unexpectedly exposes lsof"
+
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1 'exec sleep 300'
+  agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
+  agent_pid=$("$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_pid}')
+  printf 'tmux_pane_id=%s\n' "$agent_pane" >> "$case_dir/state/task-x1.meta"
+  monitor_pane=$("$case_dir/fakebin/tmux" split-window -P -F '#{pane_id}' -t firstmate:fm-task-x1 'exec sleep 300')
+  monitor_pid=$("$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_pid}')
+  "$case_dir/fakebin/tmux" select-pane -t "$monitor_pane"
+  kill -0 "$agent_pid" 2>/dev/null || fail "lsof-absent-bound-agent-reap: agent pane process did not start"
+  kill -0 "$monitor_pid" 2>/dev/null || fail "lsof-absent-bound-agent-reap: monitor pane process did not start"
+  cat > "$case_dir/fakebin/treehouse" <<EOF
+#!/usr/bin/env bash
+if kill -0 '$agent_pid' 2>/dev/null; then
+  printf '%s\n' agent-live > '$case_dir/reap-boundary'
+  exit 1
+fi
+if ! kill -0 '$monitor_pid' 2>/dev/null; then
+  printf '%s\n' monitor-dead > '$case_dir/reap-boundary'
+  exit 1
+fi
+printf '%s\n' agent-gone-monitor-live > '$case_dir/reap-boundary'
+exit 0
+EOF
+  chmod +x "$case_dir/fakebin/treehouse"
+
+  rc=0
+  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  result=$(cat "$case_dir/reap-boundary" 2>/dev/null || true)
+  "$case_dir/fakebin/tmux" kill-server >/dev/null 2>&1 || true
+
+  expect_code 0 "$rc" "lsof-absent-bound-agent-reap: teardown should succeed"
+  [ "$result" = agent-gone-monitor-live ] \
+    || fail "lsof-absent-bound-agent-reap: worktree return observed '$result'"
+  assert_grep "reaping leaked worktree process group" "$case_dir/stderr" \
+    "lsof-absent-bound-agent-reap: teardown did not reap the agent process group"
+  pass "missing lsof reaps the bound agent pane without signaling the active monitor"
+}
+
+test_lsof_absent_refuses_bound_pane_moved_after_preflight() {
+  local case_dir rc agent_pane monitor_pane destination_pane before path_without_lsof
+  case_dir=$(make_case lsof-absent-bound-pane-moved)
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  add_private_tmux_socket "$case_dir"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1 'exec sleep 300'
+  agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
+  printf 'tmux_pane_id=%s\n' "$agent_pane" >> "$case_dir/state/task-x1.meta"
+  monitor_pane=$("$case_dir/fakebin/tmux" split-window -d -P -F '#{pane_id}' -t firstmate:fm-task-x1 'exec sleep 300')
+  destination_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n moved-agent 'exec sleep 300')
+  cat > "$case_dir/fakebin/tmux" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = list-panes ]; then
+  count=0
+  [ ! -f '$case_dir/list-panes-count' ] || count=\$(cat '$case_dir/list-panes-count')
+  count=\$((count + 1))
+  printf '%s\n' "\$count" > '$case_dir/list-panes-count'
+  if [ "\$count" -eq 2 ]; then
+    "$REAL_TMUX_FOR_TEST" -S "$case_dir/tmux.sock" join-pane -d -s '$agent_pane' -t '$destination_pane'
+  fi
+fi
+exec "$REAL_TMUX_FOR_TEST" -S "$case_dir/tmux.sock" "\$@"
+EOF
+  cat > "$case_dir/fakebin/treehouse" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' return > '$case_dir/treehouse.log'
+exit 0
+EOF
+  chmod +x "$case_dir/fakebin/tmux" "$case_dir/fakebin/treehouse"
+  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+
+  rc=0
+  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "lsof-absent-bound-pane-moved: teardown must refuse pane movement"
+  assert_grep "recorded agent pane is not verified" "$case_dir/stderr" \
+    "lsof-absent-bound-pane-moved: refusal did not name the unverified recorded pane"
+  [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$before" ] \
+    || fail "lsof-absent-bound-pane-moved: refusal modified task metadata"
+  assert_absent "$case_dir/treehouse.log" \
+    "lsof-absent-bound-pane-moved: teardown returned the worktree after pane movement"
+  [ -d "$case_dir/wt" ] || fail "lsof-absent-bound-pane-moved: refusal removed the worktree"
+  "$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_id}' >/dev/null \
+    || fail "lsof-absent-bound-pane-moved: refusal removed the agent pane"
+  "$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_id}' >/dev/null \
+    || fail "lsof-absent-bound-pane-moved: refusal removed the monitor pane"
+  "$case_dir/fakebin/tmux" kill-server >/dev/null 2>&1 || true
+  pass "missing lsof refuses when a bound pane moves after preflight"
+}
+
 test_lsof_error_refuses_before_removal() {
   local case_dir rc
   case_dir=$(make_case lsof-error-refusal)
@@ -5690,6 +5790,8 @@ test_own_autonomous_run_is_left_alone
 test_leaked_worktree_process_is_reaped
 test_leaked_tasktmp_process_is_reaped
 test_lsof_absent_reaps_tmux_process_group
+test_lsof_absent_reaps_only_bound_agent_pane
+test_lsof_absent_refuses_bound_pane_moved_after_preflight
 test_lsof_error_refuses_before_removal
 test_reused_pid_identity_is_not_force_killed
 test_exec_changed_process_is_still_reaped
