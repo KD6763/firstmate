@@ -131,7 +131,8 @@ Relevant output:
 ```text
 ok - real tmux: task doorbell, keys and guarding reads stay on the recorded pane with the monitor active
 ok - real tmux: re-rings and a focus change between typing and Enter preserve the agent pane
-ok - real tmux: the watcher retries an aged steer in the recorded pane with the monitor active
+ok - real tmux: ordinary watcher delivery ignores a focused idle-shell monitor
+ok - real tmux: explicit watcher retry ignores a focused idle-shell monitor
 ok - real tmux: Enter retries and the pending-composer guard use the bound pane despite focus changes
 ok - real tmux: unbound split windows retain active-pane I/O
 ok - real tmux: mismatched, duplicate and stale pane bindings fail closed
