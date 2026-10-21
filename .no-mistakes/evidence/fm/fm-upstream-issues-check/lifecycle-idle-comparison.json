@@ -1,0 +1,35 @@
+[
+  {
+    "name": "instruction-041-idle-main",
+    "head": "97316301353be6a9edf154598e07095b3d0c926d",
+    "exit": 0,
+    "duration_ms": 4463,
+    "end_utc": "2026-10-21T21:42:14Z",
+    "label": "main",
+    "log": "data/tmux-pane-lab/fixes/ci-97316301353b/instruction-041-idle-main/run.log",
+    "output": "completed_cycle=1\nwatcher_alive=yes\nwatcher_output:\ncapture_calls=1\nkey_calls=0\nfinal_stale_since=\nstale_wakes=0\n",
+    "dead_marker": false
+  },
+  {
+    "name": "instruction-041-idle-before",
+    "head": "dfd2ea0158d2afdbdddc2ccfaab3cb56377f6e06",
+    "exit": 0,
+    "duration_ms": 3336,
+    "end_utc": "2026-10-21T21:42:18Z",
+    "label": "before",
+    "log": "data/tmux-pane-lab/fixes/ci-dfd2ea0158d2/instruction-041-idle-before/run.log",
+    "output": "completed_cycle=0\nwatcher_alive=no\ndead_marker=yes\nwatcher_output:\nstale: test:fm-bound-window (idle 502s, agent dead - the endpoint is still there with no agent running in it, so this is not a wedge; reported once and not re-escalated while it stays that way - reconcile this record, and check for unlanded work before any cleanup)\ncapture_calls=0\nkey_calls=0\nfinal_stale_since=1792618937\nstale_wakes=1\n",
+    "dead_marker": true
+  },
+  {
+    "name": "instruction-041-idle-after",
+    "head": "1cb66c067590634903c8e4711c5c8bf4f553955d",
+    "exit": 0,
+    "duration_ms": 3159,
+    "end_utc": "2026-10-21T21:42:21Z",
+    "label": "after",
+    "log": "data/tmux-pane-lab/fixes/ci-1cb66c067590/instruction-041-idle-after/run.log",
+    "output": "completed_cycle=1\nwatcher_alive=yes\nwatcher_output:\ncapture_calls=0\nkey_calls=0\nfinal_stale_since=1792618439\nstale_wakes=0\n",
+    "dead_marker": false
+  }
+]

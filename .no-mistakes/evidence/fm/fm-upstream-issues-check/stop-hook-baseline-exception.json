@@ -1,0 +1,46 @@
+{
+  "head": "1cb66c067590634903c8e4711c5c8bf4f553955d",
+  "base": "97316301353be6a9edf154598e07095b3d0c926d",
+  "case": "test_claude_stop_hook_notifies_when_at_turn_downtime_write_fails",
+  "assertion": "not ok - hook write failure: the Stop hook did not finish",
+  "candidate": {
+    "script": "tests/fm-supervision-host.test.sh",
+    "driver": "b",
+    "head": "1cb66c067590634903c8e4711c5c8bf4f553955d",
+    "exit": 1,
+    "duration_ms": 135115,
+    "ended_utc": "2026-10-21T21:50:51.049805+00:00",
+    "test_end": {
+      "exit": 1,
+      "duration_ms": 135032,
+      "gate_skip": false,
+      "line": "FM_TEST_END 2026-10-21T21:50:51Z tests/fm-supervision-host.test.sh exit=1 duration_ms=135032 gate_skip=false"
+    },
+    "log": "data/tmux-pane-lab/fixes/ci-1cb66c067590/instruction-041-b/out/fm-supervision-host/run.log"
+  },
+  "baseline_log": "data/tmux-pane-lab/fixes/ci-97316301353b/supervision-probe/run.log",
+  "unchanged_blobs": {
+    "tests/fm-supervision-host.test.sh": {
+      "97316301353be6a9edf154598e07095b3d0c926d": "0cf4197422a300cf1a29a335898eb408b614a677",
+      "1cb66c067590634903c8e4711c5c8bf4f553955d": "0cf4197422a300cf1a29a335898eb408b614a677"
+    },
+    "bin/fm-claude-stop-autoarm.sh": {
+      "97316301353be6a9edf154598e07095b3d0c926d": "f42e0846cb6dcda4a22b38d7db0b77a19dcde4ab",
+      "1cb66c067590634903c8e4711c5c8bf4f553955d": "f42e0846cb6dcda4a22b38d7db0b77a19dcde4ab"
+    },
+    "bin/fm-supervision-host.sh": {
+      "97316301353be6a9edf154598e07095b3d0c926d": "4c06500919812c3fcda3b5fbdc5f0b779a057c8d",
+      "1cb66c067590634903c8e4711c5c8bf4f553955d": "4c06500919812c3fcda3b5fbdc5f0b779a057c8d"
+    },
+    "bin/fm-watch-arm.sh": {
+      "97316301353be6a9edf154598e07095b3d0c926d": "3a996a0320e819998e15be0504a7cc9ef2860421",
+      "1cb66c067590634903c8e4711c5c8bf4f553955d": "3a996a0320e819998e15be0504a7cc9ef2860421"
+    },
+    "bin/fm-watch-checkpoint.sh": {
+      "97316301353be6a9edf154598e07095b3d0c926d": "db1dc43244d8947d8ba6d24ca49fdb6ef63d55e3",
+      "1cb66c067590634903c8e4711c5c8bf4f553955d": "db1dc43244d8947d8ba6d24ca49fdb6ef63d55e3"
+    }
+  },
+  "fixture_scope": "make_primary_home uses make_home; demo.meta is project=demo, window=fm-demo, harness=claude with no pane binding, and fake tmux exits 1.",
+  "disposition": "Existing main-failure exception, not a pass; continue only incomplete scripts."
+}
