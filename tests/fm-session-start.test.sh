@@ -1480,12 +1480,15 @@ EOF
 
   printf 'window=fm-sess:live-window\ntmux_pane_id=%%1\nkind=ship\n' > "$home/state/task-live.meta"
   printf 'window=fm-sess:split-window\ntmux_pane_id=%%3\nkind=ship\n' > "$home/state/task-dead.meta"
+  printf 'window=fm-sess:missing-window\ntmux_pane_id=%%5\nkind=ship\n' > "$home/state/task-missing.meta"
 
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
   assert_contains "$out" "endpoint: alive (backend=tmux window=fm-sess:live-window)" "live tmux endpoint not reported alive"
   assert_contains "$out" \
     "endpoint: error (backend=tmux window=fm-sess:split-window - the recorded endpoint identity could not be verified)" \
     "a missing recorded pane with an active monitor was not reported as unavailable I/O"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:missing-window)" \
+    "a missing lifecycle window was not reported through the ordinary dead branch"
 
   pass "tmux endpoint reads distinguish unavailable pane I/O from a dead lifecycle window"
 }

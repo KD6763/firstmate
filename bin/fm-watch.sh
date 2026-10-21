@@ -538,7 +538,7 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # Runs for secondmates too: their pane-staleness exemption is about quiet panes
 # being healthy, while an unacknowledged instruction can still be a stuck steer.
 inbox_steer_check() {  # <window> <task>
-  local w=$1 task=$2 action verb rec count tail40 reason='' ring_rc backend agent_state
+  local w=$1 task=$2 action verb rec count tail40 reason='' ring_rc backend agent_state meta bound=0 capture_rc=0
   action=$(fm_task_inbox_due_action "$STATE" "$task") || return 0
   verb=${action%% *}
   [ "$verb" != quiet ] || return 0
@@ -554,7 +554,20 @@ inbox_steer_check() {  # <window> <task>
       ;;
   esac
   backend=$(window_backend "$w")
-  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+  meta=$(fm_backend_meta_for_window "$w" "$STATE" 2>/dev/null || true)
+  if [ "$backend" = tmux ] && [ -n "$meta" ] && grep -q '^tmux_pane_id=' "$meta"; then
+    bound=1
+    watcher_capture "$backend" "$w" 40 "$(window_label "$w")" || capture_rc=$?
+    if [ "$capture_rc" -eq 3 ]; then
+      agent_state=missing
+    elif [ "$capture_rc" -eq 2 ]; then
+      agent_state=unreadable
+    else
+      agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+    fi
+  else
+    agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+  fi
   case "$agent_state" in
     dead|missing)
       if [ "$verb" = retry ]; then
@@ -565,7 +578,11 @@ inbox_steer_check() {  # <window> <task>
       return 0
       ;;
   esac
-  watcher_capture "$backend" "$w" 40 "$(window_label "$w")" || WATCHER_CAPTURE=
+  if [ "$bound" -eq 0 ]; then
+    watcher_capture "$backend" "$w" 40 "$(window_label "$w")" || WATCHER_CAPTURE=
+  elif [ "$capture_rc" -ne 0 ]; then
+    WATCHER_CAPTURE=
+  fi
   tail40=$WATCHER_CAPTURE
   if window_is_busy "$w" "$tail40"; then
     [ "$verb" != retry ] || return 0
@@ -2391,13 +2408,17 @@ fm_capture_output_cleanup() {
 # so a stop is not held for a blocked read (watcher_stop_signals). The group is
 # recorded like a check's, so watcher_cleanup stops a read still in flight.
 watcher_capture_process() {  # <backend> <target> <lines> [expected-label] [capture|composer]
-  local meta state target=$2
+  local meta window target=$2 window_rc
   if [ "$1" = tmux ]; then
     meta=$(fm_backend_meta_for_window "$2" "$STATE" 2>/dev/null || true)
     if [ -n "$meta" ]; then
       target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || {
-        state=$(fm_backend_agent_state "$1" "$2" 2>/dev/null) || state=unreadable
-        case "$state" in dead|missing) return 3 ;; esac
+        window=$(fm_backend_target_of_meta "$meta")
+        case "$window" in *:*:*|:*|*:) return 2 ;; *:*) ;; *) return 2 ;; esac
+        fm_backend_source tmux || return 2
+        fm_backend_tmux_window_id "${window%%:*}" "${window#*:}" >/dev/null 2>&1
+        window_rc=$?
+        [ "$window_rc" -ne 2 ] || return 3
         return 2
       }
     fi

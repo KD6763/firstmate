@@ -589,8 +589,18 @@ fm_session_start_endpoint_read() {  # <meta> [expected-label]
   # shellcheck disable=SC2016  # Positional parameters expand inside the child bash, not here.
   fm_run_timed "$ENDPOINT_TIMEOUT" bash -c '
     . "$1"
-    target=$(fm_backend_io_target_of_meta "$2" 2>/dev/null) || exit 125
     backend=$(fm_backend_of_meta "$2")
+    target=$(fm_backend_io_target_of_meta "$2" 2>/dev/null) || {
+      if [ "$backend" = tmux ]; then
+        window=$(fm_backend_target_of_meta "$2")
+        case "$window" in *:*:*|:*|*:) exit 125 ;; *:*) ;; *) exit 125 ;; esac
+        fm_backend_source tmux || exit 125
+        fm_backend_tmux_window_id "${window%%:*}" "${window#*:}" >/dev/null 2>&1
+        window_rc=$?
+        [ "$window_rc" -ne 2 ] || exit 1
+      fi
+      exit 125
+    }
     fm_backend_target_exists "$backend" "$target" "$3"
   ' _ "$SCRIPT_DIR/fm-backend.sh" "$meta" "$label"
 }

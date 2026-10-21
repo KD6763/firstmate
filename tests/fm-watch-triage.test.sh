@@ -3924,48 +3924,50 @@ test_gone_endpoint_reports_once_instead_of_escalating_forever() {
 }
 
 test_missing_pane_binding_keeps_window_lifecycle_and_delivery_ladder() {
-  local dir state fakebin out window key rec pid action since
+  local monitor_command dir state fakebin out window key rec pid action since
   window='test:fm-bound-window'; key=$(printf '%s' "$window" | tr ':/.' '___')
-  dir=$(make_case missing-bound-pane); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
-  printf 'window=%s\nkind=ship\nharness=grok\nbackend=tmux\ntmux_pane_id=%%2\n' "$window" > "$state/bound.meta"
-  printf 'working: processing the next turn\n' > "$state/bound.status"
-  prime_status_seen "$state" "$state/bound.status"
-  rec=$(FM_STATE_OVERRIDE="$state" bash -c '
-    . "$1"
-    fm_task_inbox_write "$2" bound "inspect this durable steer"
-  ' _ "$ROOT/bin/fm-task-inbox-lib.sh" "$state") || fail "could not write the bound-pane inbox fixture"
-  set_mtime "$(( $(date +%s) - 2000 ))" "$rec"
-  since=$(( $(date +%s) - 500 ))
-  printf '%s\n' "$since" > "$state/.stale-since-$key"
+  for monitor_command in grok bash; do
+    dir=$(make_case "missing-bound-pane-$monitor_command"); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+    printf 'window=%s\nkind=ship\nharness=grok\nbackend=tmux\ntmux_pane_id=%%2\n' "$window" > "$state/bound.meta"
+    printf 'working: processing the next turn\n' > "$state/bound.status"
+    prime_status_seen "$state" "$state/bound.status"
+    rec=$(FM_STATE_OVERRIDE="$state" bash -c '
+      . "$1"
+      fm_task_inbox_write "$2" bound "inspect this durable steer"
+    ' _ "$ROOT/bin/fm-task-inbox-lib.sh" "$state") || fail "could not write the bound-pane inbox fixture"
+    set_mtime "$(( $(date +%s) - 2000 ))" "$rec"
+    since=$(( $(date +%s) - 500 ))
+    printf '%s\n' "$since" > "$state/.stale-since-$key"
 
-  FM_FAKE_TMUX_LOG="$dir/tmux.log" FM_FAKE_TMUX_WINDOWS=fm-bound-window \
-    FM_FAKE_TMUX_PANES='%1' FM_FAKE_TMUX_ALL_PANES='%1' \
-    FM_FAKE_TMUX_CURRENT_COMMAND=grok FM_FAKE_CREW_STATE='state: working · source: run-step · monitor busy' \
-    watch_bg "$state" "$fakebin" "$out" env FM_TASK_INBOX_GRACE_SECS=999
-  pid=$!
-  wait_poll_cycle "$state" "$pid" || { reap "$pid"; fail "the live-window missing-pane case exited as lifecycle death"; }
-  [ "$(cat "$state/.stale-since-$key" 2>/dev/null || true)" = "$since" ] \
-    || { reap "$pid"; fail "the missing pane changed the live window's existing supervision timer"; }
-  [ ! -e "$state/.wedge-escalations-$key" ] \
-    || { reap "$pid"; fail "the missing pane advanced a refusal-driven wedge escalation"; }
-  [ "$(wedge_stale_wakes "$state" "$window")" -eq 0 ] \
-    || { reap "$pid"; fail "the missing pane queued a refusal-driven stale wake"; }
-  action=$(FM_STATE_OVERRIDE="$state" bash -c '
-    . "$1"
-    fm_task_inbox_due_action "$2" bound
-  ' _ "$ROOT/bin/fm-task-inbox-lib.sh" "$state")
-  [ "$action" = quiet ] || { reap "$pid"; fail "the failed pane ring bypassed its delivery-attempt grace: $action"; }
-  IFS=$(printf '\t') read -r _ count _ < "$state/bound.inbox/.ring-state"
-  [ "$count" = 1 ] || { reap "$pid"; fail "the missing pane did not consume one ordinary delivery attempt"; }
-  [ ! -e "$state/bound.inbox/.escalated" ] || { reap "$pid"; fail "the missing pane bypassed the delivery ladder"; }
-  [ ! -e "$state/.dead-reported-$key" ] || { reap "$pid"; fail "the missing pane became lifecycle death"; }
-  [ ! -e "$state/.binding-unavailable-$key" ] || { reap "$pid"; fail "the missing pane created recovery-only binding state"; }
-  if grep -E 'capture-pane|send-keys' "$dir/tmux.log" >/dev/null; then
+    FM_FAKE_TMUX_LOG="$dir/tmux.log" FM_FAKE_TMUX_WINDOWS=fm-bound-window \
+      FM_FAKE_TMUX_PANES='%1' FM_FAKE_TMUX_ALL_PANES='%1' \
+      FM_FAKE_TMUX_CURRENT_COMMAND="$monitor_command" FM_FAKE_CREW_STATE='state: working · source: run-step · monitor busy' \
+      watch_bg "$state" "$fakebin" "$out" env FM_TASK_INBOX_GRACE_SECS=999
+    pid=$!
+    wait_poll_cycle "$state" "$pid" || { reap "$pid"; fail "the live-window missing-pane case exited as lifecycle death with a $monitor_command monitor"; }
+    [ "$(cat "$state/.stale-since-$key" 2>/dev/null || true)" = "$since" ] \
+      || { reap "$pid"; fail "the missing pane changed the live window's existing supervision timer with a $monitor_command monitor"; }
+    [ ! -e "$state/.wedge-escalations-$key" ] \
+      || { reap "$pid"; fail "the missing pane advanced a refusal-driven wedge escalation with a $monitor_command monitor"; }
+    [ "$(wedge_stale_wakes "$state" "$window")" -eq 0 ] \
+      || { reap "$pid"; fail "the missing pane queued a refusal-driven stale wake with a $monitor_command monitor"; }
+    action=$(FM_STATE_OVERRIDE="$state" bash -c '
+      . "$1"
+      fm_task_inbox_due_action "$2" bound
+    ' _ "$ROOT/bin/fm-task-inbox-lib.sh" "$state")
+    [ "$action" = quiet ] || { reap "$pid"; fail "the failed pane ring bypassed its delivery-attempt grace: $action"; }
+    IFS=$(printf '\t') read -r _ count _ < "$state/bound.inbox/.ring-state"
+    [ "$count" = 1 ] || { reap "$pid"; fail "the missing pane did not consume one ordinary delivery attempt"; }
+    [ ! -e "$state/bound.inbox/.escalated" ] || { reap "$pid"; fail "the missing pane bypassed the delivery ladder"; }
+    [ ! -e "$state/.dead-reported-$key" ] || { reap "$pid"; fail "the missing pane became lifecycle death"; }
+    [ ! -e "$state/.binding-unavailable-$key" ] || { reap "$pid"; fail "the missing pane created recovery-only binding state"; }
+    if grep -E 'capture-pane|send-keys' "$dir/tmux.log" >/dev/null; then
+      reap "$pid"
+      fail "the missing binding routed I/O to the surviving monitor: $(cat "$dir/tmux.log")"
+    fi
     reap "$pid"
-    fail "the missing binding routed I/O to the surviving monitor: $(cat "$dir/tmux.log")"
-  fi
-  reap "$pid"
-  ack_stopped_cycle "$state" || fail "could not acknowledge the missing-pane watcher stop"
+    ack_stopped_cycle "$state" || fail "could not acknowledge the missing-pane watcher stop"
+  done
 
   dir=$(make_case missing-lifecycle-window); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
   printf 'window=%s\nkind=ship\nharness=grok\nbackend=tmux\ntmux_pane_id=%%2\n' "$window" > "$state/bound.meta"
