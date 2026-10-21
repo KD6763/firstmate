@@ -3082,6 +3082,7 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  fm_test_tmux_protocol "$fakebin/tmux"
   make_fake_crew_state "$fakebin" >/dev/null
   printf '%s\n' "$dir"
 }
