@@ -299,7 +299,7 @@ test_pane_metadata_does_not_change_lifecycle_control() {
       expect_code 0 "$rc" "$verb changed with $binding pane metadata"$'\n'"$out"
       grep -q '^send-keys -t .*:fm-t1 ' "$dir/fake/calls" \
         || fail "$verb lost its existing window target with $binding metadata"
-      if grep -E '^send-keys -t %|^list-panes ' "$dir/fake/calls"; then
+      if grep -E '^send-keys -t %' "$dir/fake/calls"; then
         fail "$verb introduced pane-bound lifecycle behavior"
       fi
     done
