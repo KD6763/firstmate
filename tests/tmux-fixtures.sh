@@ -10,24 +10,6 @@ fm_test_tmux_number() {
   printf '%s' "${1##*:}" | cksum | awk '{print $1}'
 }
 
-fm_test_bind_tmux_meta() { # <meta>: explicitly mark a current, bound fixture
-  local meta=$1 window backend contents
-  backend=$(sed -n 's/^backend=//p' "$meta")
-  [ -z "$backend" ] || [ "$backend" = tmux ] || return 0
-  grep -q '^tmux_pane_id=' "$meta" && return 0
-  window=$(sed -n 's/^window=//p' "$meta")
-  case "$window" in ''|remote:*|*:*:*) return 0 ;; esac
-  # pr= terminates the persisted PR identity contract, so pane metadata belongs
-  # before it, just as it does in a freshly published spawn record.
-  contents=$(cat "$meta") || return 1
-  printf 'tmux_pane_id=%%%s\n%s\n' "$(fm_test_tmux_number "$window")" "$contents" > "$meta"
-}
-
-fm_write_tmux_meta() {
-  fm_write_meta "$@"
-  fm_test_bind_tmux_meta "$1"
-}
-
 fm_test_tmux_protocol() { # <fake executable> [meta-inventory]
   local fake=$1 inventory=${2:-provider} helper provider
   helper=$FM_TEST_TMUX_HELPER
@@ -106,9 +88,4 @@ NAMES
     prev=$arg
   done
   "$provider" "$verb" "${translated[@]}"
-}
-
-fm_write_bound_secondmate_meta() {
-  fm_write_secondmate_meta "$@"
-  fm_test_bind_tmux_meta "$1"
 }

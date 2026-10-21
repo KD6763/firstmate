@@ -38,7 +38,6 @@ backend=tmux
 home=$sub_abs
 worktree=$sub_abs
 EOF
-  fm_test_bind_tmux_meta "$home/state/$id.meta"
 }
 
 inbox_body_stream() { # <state-dir> <task-id>
@@ -72,7 +71,6 @@ backend=tmux
 home=$sub
 worktree=$sub
 EOF
-  fm_test_bind_tmux_meta "$home/state/design.meta"
   cat > "$home/data/backlog.md" <<'EOF'
 ## Queued
 - [ ] wake-item - routed to a live receiver (repo: alpha)

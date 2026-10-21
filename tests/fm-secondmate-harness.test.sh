@@ -1159,7 +1159,6 @@ add_sm_worktree() {
     printf 'kind=secondmate\n'
     printf 'home=%s/%s\n' "$w" "$id"
   } > "$w/home/state/$id.meta"
-  fm_test_bind_tmux_meta "$w/home/state/$id.meta"
 }
 
 make_fake_toolchain() {

@@ -85,7 +85,6 @@ add_sm_worktree() {
     printf 'harness=codex\n'
     printf 'home=%s/%s\n' "$w" "$id"
   } > "$w/home/state/$id.meta"
-  fm_test_bind_tmux_meta "$w/home/state/$id.meta"
 }
 
 # bump_primary <w> <mode>: advance the PRIMARY's main branch by one local commit.
@@ -509,7 +508,6 @@ test_bootstrap_nudge_retry_rejects_malformed_marker_id() {
     printf 'kind=secondmate\n'
     printf 'home=%s\n' "$evil"
   } > "$w/home/escape.meta"
-  fm_test_bind_tmux_meta "$w/home/escape.meta"
   fakebin=$(make_fake_toolchain "$w")
   log="$w/tmux.log"
 

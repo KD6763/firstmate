@@ -40,8 +40,6 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# shellcheck source=tests/tmux-fixtures.sh
-. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 # shellcheck source=bin/fm-marker-lib.sh
 . "$ROOT/bin/fm-marker-lib.sh"
 # shellcheck source=bin/fm-pending-reply-lib.sh
@@ -86,7 +84,6 @@ esac
 exit 0
 SH
   chmod +x "$fb/tmux"
-  fm_test_tmux_protocol "$fb/tmux" meta-inventory
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 exit 0
