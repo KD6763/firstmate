@@ -674,8 +674,8 @@ backlog_row_state() {
 make_path_without_lsof() {  # <case-dir>
   local case_dir=$1 path_dir="$1/path-without-lsof" cmd resolved
   mkdir -p "$path_dir"
-  for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id ln \
-    mkdir mktemp mv perl ps readlink realpath rm sed sh sleep sort stat tail timeout tr uname wc xargs; do
+  for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id jq ln \
+    mkdir mktemp mv node perl ps readlink realpath rm sed sh sleep sort stat tail tasks-axi timeout tr uname wc xargs; do
     resolved=$(command -v "$cmd" 2>/dev/null) || continue
     case "$resolved" in /*) ln -sf "$resolved" "$path_dir/$cmd" ;; esac
   done
@@ -5143,9 +5143,10 @@ EOF
 }
 
 test_lsof_absent_refuses_bound_pane_moved_after_preflight() {
-  local case_dir rc agent_pane monitor_pane destination_pane before path_without_lsof
+  local case_dir rc agent_pane monitor_pane destination_pane before after path_without_lsof
   case_dir=$(make_case lsof-absent-bound-pane-moved)
   write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
   land_shippable_commit "$case_dir"
   add_private_tmux_socket "$case_dir"
   path_without_lsof=$(make_path_without_lsof "$case_dir")
@@ -5183,6 +5184,10 @@ EOF
     "lsof-absent-bound-pane-moved: refusal did not name the unverified recorded pane"
   [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$before" ] \
     || fail "lsof-absent-bound-pane-moved: refusal modified task metadata"
+  assert_absent "$case_dir/state/task-x1.backlog-close" \
+    "lsof-absent-bound-pane-moved: refusal left a replayable backlog close"
+  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
+    || fail "lsof-absent-bound-pane-moved: refusal changed the backlog row"
   assert_absent "$case_dir/treehouse.log" \
     "lsof-absent-bound-pane-moved: teardown returned the worktree after pane movement"
   [ -d "$case_dir/wt" ] || fail "lsof-absent-bound-pane-moved: refusal removed the worktree"
@@ -5190,8 +5195,27 @@ EOF
     || fail "lsof-absent-bound-pane-moved: refusal removed the agent pane"
   "$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_id}' >/dev/null \
     || fail "lsof-absent-bound-pane-moved: refusal removed the monitor pane"
+
+  rc=0
+  FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$case_dir" \
+    FM_STATE_OVERRIDE="$case_dir/state" FM_DATA_OVERRIDE="$case_dir/data" \
+    FM_CONFIG_OVERRIDE="$case_dir/config" FM_BOOTSTRAP_NETWORK=skip \
+    PATH="$case_dir/fakebin:$PATH" \
+    "$ROOT/bin/fm-bootstrap.sh" > "$case_dir/bootstrap.stdout" 2> "$case_dir/bootstrap.stderr" || rc=$?
+  expect_code 0 "$rc" "lsof-absent-bound-pane-moved: bootstrap replay should complete"
+  after=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
+  [ "$after" = "$before" ] \
+    || fail "lsof-absent-bound-pane-moved: bootstrap replay modified task metadata"
+  assert_absent "$case_dir/state/task-x1.backlog-close" \
+    "lsof-absent-bound-pane-moved: bootstrap found a replayable backlog close"
+  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
+    || fail "lsof-absent-bound-pane-moved: bootstrap replay changed the backlog row"
+  "$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_id}' >/dev/null \
+    || fail "lsof-absent-bound-pane-moved: bootstrap removed the agent pane"
+  "$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_id}' >/dev/null \
+    || fail "lsof-absent-bound-pane-moved: bootstrap removed the monitor pane"
   "$case_dir/fakebin/tmux" kill-server >/dev/null 2>&1 || true
-  pass "missing lsof refuses when a bound pane moves after preflight"
+  pass "missing lsof pane-move refusal remains inert across bootstrap replay"
 }
 
 test_lsof_error_refuses_before_removal() {

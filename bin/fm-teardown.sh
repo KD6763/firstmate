@@ -3693,6 +3693,14 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
     echo "error: the pending backlog $BACKLOG_TRANSITION for $ID is not replayable; refusing destructive teardown" >&2
     exit 1
   }
+else
+  if [ "$CLEANUP_RECOVERY" = orca ]; then
+    BACKLOG_SKIP_REASON="Orca cleanup recovery is not a launched backlog worker"
+  else
+    BACKLOG_SKIP_REASON=$TEARDOWN_BACKLOG_SKIP_REASON
+  fi
+fi
+
 # Roll the accepted legacy incarnation's stamp back to the record's exact
 # pre-stamp bytes. Uses perl - already in the teardown lifecycle's curated PATH
 # (truncate is not, and is absent on stock macOS) - and verifies the restored
@@ -3705,6 +3713,26 @@ teardown_legacy_stamp_rollback() {
   [ "$(wc -c < "$META" | tr -d ' ')" = "$TEARDOWN_LEGACY_PRESTAMP_SIZE" ]
 }
 
+# Every landed/discard-work refusal above has now passed (or --force skipped
+# them). Fix 1 and Fix 2 (see script header) run here, unconditionally on
+# --force, and before ANY destructive step below - a still-parked run or a
+# leaked process can own live work in this exact worktree. Not for
+# kind=secondmate: a secondmate home's own runtime lifecycle is owned by the
+# dedicated process-event and firstmate-home removal machinery further below,
+# not by task-worktree cleanup.
+if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ] \
+   && [ "$ORCA_PATH_MATCH_VERIFIED" != 1 ]; then
+  require_orca_worktree_path_match_if_present "$ORCA_WORKTREE_ID" "$WT" || exit 1
+  ORCA_PATH_MATCH_VERIFIED=1
+fi
+if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
+  conclude_task_no_mistakes_run "$WT"
+  reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
+elif [ "$KIND" != secondmate ]; then
+  reap_task_worktree_processes tasktmp "$TASK_TMP"
+fi
+
+if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
   # The accepted legacy incarnation is stamped under the meta lock already
   # held, right before the close marker binds to it: every refusal above leaves
   # the record byte-identical, and every later replay reads the same stamped
@@ -3753,27 +3781,8 @@ teardown_legacy_stamp_rollback() {
     fi
     exit 1
   fi
-else
-  if [ "$CLEANUP_RECOVERY" = orca ]; then
-    BACKLOG_SKIP_REASON="Orca cleanup recovery is not a launched backlog worker"
-  else
-    BACKLOG_SKIP_REASON=$TEARDOWN_BACKLOG_SKIP_REASON
-  fi
 fi
 
-# Every landed/discard-work refusal above has now passed (or --force skipped
-# them). Fix 1 and Fix 2 (see script header) run here, unconditionally on
-# --force, and before ANY destructive step below - a still-parked run or a
-# leaked process can own live work in this exact worktree. Not for
-# kind=secondmate: a secondmate home's own runtime lifecycle is owned by the
-# dedicated process-event and firstmate-home removal machinery further below,
-# not by task-worktree cleanup.
-if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
-  conclude_task_no_mistakes_run "$WT"
-  reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
-elif [ "$KIND" != secondmate ]; then
-  reap_task_worktree_processes tasktmp "$TASK_TMP"
-fi
 if [ "$KIND" = ship ] && teardown_owns_worktree && [ -e "$CONFIG/pipeline-spend" ]; then
   FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" FM_CONFIG_OVERRIDE="$CONFIG" \
     "$SCRIPT_DIR/fm-pipeline-spend.sh" record "$ID" >/dev/null \
@@ -3786,10 +3795,6 @@ fi
 
 # Best-effort: drop the local task branch so the shared repo does not accumulate refs.
 if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
-  if [ "$ORCA_PATH_MATCH_VERIFIED" != 1 ]; then
-    require_orca_worktree_path_match_if_present "$ORCA_WORKTREE_ID" "$WT" || exit 1
-    ORCA_PATH_MATCH_VERIFIED=1
-  fi
   if [ -d "$WT" ]; then
     branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
     if [ "$branch" != "HEAD" ]; then
