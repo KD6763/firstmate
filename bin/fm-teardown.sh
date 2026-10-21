@@ -205,10 +205,10 @@
 #   teardown then proceeds only when the recorded endpoint is confirmed dead or
 #   agent-less (bin/fm-backend.sh's recovery-grade classifier), and without
 #   --force the worktree still passes the ordinary landed-work checks.
-#   Every tmux record that lacks tmux_pane_id requires its exact recorded window
-#   to be absent: first finish or exit the task in its own terminal and close
-#   that window after preserving its work. A surviving window, even with one
-#   idle shell, is not agent proof. No pane is adopted or recorded by this path.
+#   Tmux records without tmux_pane_id retain the existing window-based teardown
+#   behavior; pane identity checks apply only when the record carries that field.
+#   See docs/agent-control.md#upgrading-unbound-tmux-tasks for the retirement and
+#   fresh-spawn upgrade procedure. No pane is adopted or recorded by this path.
 #   A record that also lacks spawn_gen still requires --legacy-record. The
 #   accepted legacy incarnation is stamped into the record before its close is
 #   recorded and named in the teardown line; the flag never relaxes the

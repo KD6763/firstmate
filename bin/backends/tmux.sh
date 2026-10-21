@@ -142,6 +142,7 @@ fm_backend_tmux_send_literal() {  # <target> <text>
 # The target is passed through exactly as the caller means it, so a caller that
 # requires the exact recorded session asks for `=session` and still gets the
 # same classification.
+# Absence is judged on the selected tmux server because task records carry no socket identity; follow-up: https://github.com/kunchenguid/firstmate/issues/7590.
 fm_backend_tmux_window_inventory() {  # <session-target>
   local windows
   case "$1" in

@@ -56,6 +56,7 @@ Control and automatic recovery refuse unbound records; teardown retains the pre-
 A target-existence check proves only that the pane exists.
 Task endpoint resolution first verifies the bound pane or exact window membership, then the deeper tmux agent-liveness probe reads process names to distinguish a running harness from a bare idle shell.
 Together they classify recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, Rovo, and AGY process identities as `alive`, common shells as `dead`, an absent bound pane or window as `missing` only when readable inventory proves that absence, unreadable or unproven state as `unreadable`, and every other process as `ambiguous`.
+Tmux absence is judged on the selected tmux server under the same single-server assumption as baseline behavior because task records carry no socket identity; recording socket identity is tracked in [issue #7590](https://github.com/kunchenguid/firstmate/issues/7590).
 The process-name vocabulary behind those verdicts is owned by `bin/fm-agent-process-lib.sh` and shared with the Herdr adapter, which proves a registered agent against the same names ([herdr-backend.md](herdr-backend.md) "Restart and liveness behavior").
 Authority-bearing paths require a durable pane binding first, then only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.
 
