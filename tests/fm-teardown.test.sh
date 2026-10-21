@@ -708,7 +708,7 @@ SH
     run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"; rc=$?
     expect_code 0 "$rc" "teardown changed with $binding pane metadata"
     [ ! -e "$case_dir/state/task-x1.meta" ] || fail "teardown retained $binding metadata"
-    grep -q '^kill-window -t .*:fm-task-x1$' "$case_dir/tmux.calls" \
+    grep -q '^kill-window -t =firstmate:=fm-task-x1$' "$case_dir/tmux.calls" \
       || fail "teardown lost its window target with $binding metadata"
   done
   pass "teardown: bound, malformed and unbound pane fields retain window-based cleanup"

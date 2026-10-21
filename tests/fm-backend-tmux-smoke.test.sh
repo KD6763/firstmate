@@ -335,8 +335,8 @@ AGENT_PANE=$(tmux new-window -dP -F '#{pane_id}' -t "$SESSION:" -n fm-pane "$col
   || fail "real tmux: could not start original byte collector"
 wait_for_capture_text "$AGENT_PANE" collector-ready || fail "original collector did not start"
 printf 'window=%s\nharness=codex\nkind=scout\n' "$PANE_WINDOW" > "$PANE_HOME/state/pane.meta"
-[ "$(fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta")" = "$AGENT_PANE" ] \
-  || fail "legacy single-pane task did not bind its only pane"
+[ "$(fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta")" = "$PANE_WINDOW" ] \
+  || fail "legacy single-pane task lost its window target"
 printf 'tmux_pane_id=%s\n' "$AGENT_PANE" >> "$PANE_HOME/state/pane.meta"
 printf -v collector_cmd 'bash %q %q' "$SHIM_DIR/collect" "$SHIM_DIR/monitor.bytes"
 MONITOR_PANE=$(tmux split-window -t "$AGENT_PANE" -P -F '#{pane_id}' "$collector_cmd") \

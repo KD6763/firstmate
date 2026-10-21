@@ -5073,7 +5073,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   if spawn_endpoint_closes_on_abort; then
     validate_spawn_worktree "treehouse get" "$WT ($(spawn_endpoint_hint))"
   else
-    validate_spawn_worktree "treehouse get" "$T"
+    validate_spawn_worktree "treehouse get" "${TMUX_WINDOW_TARGET:-$T}"
   fi
 
   # Claim the pool slot for this task. The interactive `treehouse get` sent to

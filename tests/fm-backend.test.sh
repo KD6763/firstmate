@@ -644,7 +644,7 @@ test_meta_get_and_backend_of_meta() {
   [ "$(fm_meta_get "$edge" token)" = "last=value" ] \
     || fail "fm_meta_get did not preserve last-value or no-final-newline semantics"
 
-  for backend in herdr zellij cmux orca; do
+  for backend in herdr zellij cmux orca paseo; do
     fm_write_meta "$edge" "backend=$backend" "window=session:pane" "terminal=terminal-id"
     target=session:pane
     [ "$backend" != orca ] || target=terminal-id
