@@ -516,8 +516,8 @@ window_key() {  # <window>
 }
 
 inbox_steer_escalate_unavailable() {  # <window> <task> <record>
-  local w=$1 task=$2 rec=$3 reason detail=${4:-"the worker's agent has exited or its endpoint is missing"}
-  reason="stale: $w (unread firstmate instruction: $rec is unhandled and $detail, so the doorbell was not typed; inspect the task record and recover the worker)"
+  local w=$1 task=$2 rec=$3 reason
+  reason="stale: $w (unread firstmate instruction: $rec is unhandled and the worker's agent has exited or its endpoint is missing, so the doorbell was not typed; recover the worker)"
   if [ ! -d "${rec%/*}" ] || [ ! -f "$rec" ]; then
     fm_task_inbox_due_action "$STATE" "$task" >/dev/null || true
     return 0
@@ -538,7 +538,7 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # Runs for secondmates too: their pane-staleness exemption is about quiet panes
 # being healthy, while an unacknowledged instruction can still be a stuck steer.
 inbox_steer_check() {  # <window> <task>
-  local w=$1 task=$2 action verb rec count tail40 reason='' ring_rc backend agent_state target
+  local w=$1 task=$2 action verb rec count tail40 reason='' ring_rc backend agent_state
   action=$(fm_task_inbox_due_action "$STATE" "$task") || return 0
   verb=${action%% *}
   [ "$verb" != quiet ] || return 0
@@ -554,15 +554,7 @@ inbox_steer_check() {  # <window> <task>
       ;;
   esac
   backend=$(window_backend "$w")
-  target=$(fm_backend_io_target_of_meta "$STATE/$task.meta" 2>/dev/null) || {
-    if [ "$verb" = retry ]; then
-      fm_task_inbox_clear_retry "$STATE" "$task" "$rec" || true
-    else
-      inbox_steer_escalate_unavailable "$w" "$task" "$rec" "its recorded agent pane could not be verified"
-    fi
-    return 0
-  }
-  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)
+  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
   case "$agent_state" in
     dead|missing)
       if [ "$verb" = retry ]; then
@@ -573,7 +565,7 @@ inbox_steer_check() {  # <window> <task>
       return 0
       ;;
   esac
-  watcher_capture "$backend" "$target" 40 "$(window_label "$w")" || WATCHER_CAPTURE=
+  watcher_capture "$backend" "$w" 40 "$(window_label "$w")" || WATCHER_CAPTURE=
   tail40=$WATCHER_CAPTURE
   if window_is_busy "$w" "$tail40"; then
     [ "$verb" != retry ] || return 0
@@ -925,16 +917,15 @@ secondmate_busy_class() {  # <window>
 # composer all refuse, so a Kimi or Claude pane without an exact idle
 # verdict is never typed into.
 secondmate_idle_ring_safe() {  # <window>
-  local w=$1 backend agent_state cstate target task
+  local w=$1 backend agent_state cstate
   [ -n "$w" ] || return 1
-  task=$(window_to_task "$w" "$STATE")
-  target=$(fm_backend_io_target_of_meta "$STATE/$task.meta" 2>/dev/null) || return 1
   secondmate_busy_class "$w"
   [ "$SECONDMATE_BUSY_CLASS" = idle ] || return 1
   backend=$(window_backend "$w")
-  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)
+  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
   [ "$agent_state" = alive ] || return 1
-  cstate=$(fm_backend_composer_state "$backend" "$target" "$(window_label "$w")" 2>/dev/null) || cstate=unknown
+  watcher_capture "$backend" "$w" 0 "$(window_label "$w")" composer || return 1
+  cstate=$WATCHER_CAPTURE
   [ "$cstate" != pending ] || return 1
   return 0
 }
@@ -1534,21 +1525,10 @@ clear_write_tracking() {  # <window-key>
 # display absorbs on every threshold either way.
 # Returns 0 when it has handled the window, 1 to escalate on the unchanged path.
 wedge_dead_record() {  # <window> <since-file> <triage-label> <idle-age> <pane-hash> <task>
-  local win=$1 since_file=$2 label=$3 age=$4 hash=$5 task=$6 key marker agent_state detail reason gen id backend target rc
+  local win=$1 since_file=$2 label=$3 age=$4 hash=$5 task=$6 key marker agent_state detail reason gen id
   key=$(window_key "$win")
   marker="$STATE/.dead-reported-$key"
-  backend=$(window_backend "$win")
-  if [ "$backend" = tmux ]; then
-    if target=$(fm_backend_io_target_of_meta "$STATE/$task.meta" 2>/dev/null); then
-      agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
-    else
-      rc=$?
-      agent_state=unreadable
-      [ "$rc" -ne 2 ] || agent_state=missing
-    fi
-  else
-    agent_state=$(fm_backend_agent_state "$backend" "$win" 2>/dev/null) || agent_state=unreadable
-  fi
+  agent_state=$(fm_backend_agent_state "$(window_backend "$win")" "$win" 2>/dev/null) || agent_state=unreadable
   case "$agent_state" in
     dead) detail='the endpoint is still there with no agent running in it' ;;
     missing) detail='the recorded endpoint is gone' ;;
@@ -1945,7 +1925,7 @@ clear_pause_tracking() {  # <window-key>
 # recovered only for a confidently dead ordinary crew, or for a secondmate, whose
 # endpoint liveness this function deliberately never reads.
 pause_state_class() {  # <window> <task>
-  local win=$1 task=$2 key last recheck_file class agent_alive kind target target_rc=0
+  local win=$1 task=$2 key last recheck_file class agent_alive kind
   key=$(window_key "$win")
   last=$(status_declared_wait_line "$STATE/$task.status")
   recheck_file="$STATE/.paused-rechecked-$key"
@@ -1958,18 +1938,9 @@ pause_state_class() {  # <window> <task>
   # so a mate's stale poll costs one metadata scan rather than one per gate, and the
   # far more common no-declaration path above still costs none.
   kind=$(window_kind "$win")
-  if [ "$kind" != secondmate ]; then
-    target=$(fm_backend_io_target_of_meta "$STATE/$task.meta" 2>/dev/null) || target_rc=$?
-    if [ "$target_rc" -eq 0 ]; then
-      agent_alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$target" 2>/dev/null) || agent_alive=unknown
-    elif [ "$target_rc" -eq 2 ]; then
-      agent_alive=dead
-    else
-      agent_alive=unknown
-    fi
-  fi
   if [ -e "$STATE/.paused-$key" ] && [ "$(age_of "$recheck_file")" -lt "$STALE_ESCALATE_SECS" ]; then
     if [ "$kind" != secondmate ]; then
+      agent_alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || agent_alive=unknown
       if [ "$agent_alive" != dead ]; then
         rm -f "$recheck_file"
         printf 'none'
@@ -1986,6 +1957,7 @@ pause_state_class() {  # <window> <task>
     return
   fi
   if [ "$kind" != secondmate ]; then
+    agent_alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || agent_alive=unknown
     if [ "$agent_alive" != dead ]; then
       rm -f "$recheck_file"
       printf 'none'
@@ -2408,7 +2380,6 @@ run_check_capture() {
 
 FM_CAPTURE_OUTPUT=
 WATCHER_CAPTURE=
-WATCHER_CAPTURE_BINDING_UNAVAILABLE=0
 
 fm_capture_output_cleanup() {
   [ -z "$FM_CAPTURE_OUTPUT" ] || rm -f -- "$FM_CAPTURE_OUTPUT"
@@ -2419,20 +2390,23 @@ fm_capture_output_cleanup() {
 # The read runs as a waited background process group rather than inside $(...),
 # so a stop is not held for a blocked read (watcher_stop_signals). The group is
 # recorded like a check's, so watcher_cleanup stops a read still in flight.
-watcher_capture() {  # <backend> <target> <lines> [expected-label]
-  local rc pgid meta target
-  WATCHER_CAPTURE_BINDING_UNAVAILABLE=0
-  WATCHER_CAPTURE=
+watcher_capture_process() {  # <backend> <target> <lines> [expected-label] [capture|composer]
+  local meta target=$2
   if [ "$1" = tmux ]; then
     meta=$(fm_backend_meta_for_window "$2" "$STATE" 2>/dev/null || true)
     if [ -n "$meta" ]; then
-      if ! target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null); then
-        WATCHER_CAPTURE_BINDING_UNAVAILABLE=1
-        return 1
-      fi
-      set -- "$1" "$target" "$3" "${4:-}"
+      target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || return 2
     fi
   fi
+  case "${5:-capture}" in
+    capture) fm_backend_capture "$1" "$target" "$3" "${4:-}" ;;
+    composer) fm_backend_composer_state "$1" "$target" "${4:-}" ;;
+    *) return 1 ;;
+  esac
+}
+
+watcher_capture() {  # <backend> <target> <lines> [expected-label]
+  local rc pgid
   fm_capture_output_cleanup
   WATCHER_CAPTURE=
   FM_CAPTURE_OUTPUT=$(mktemp "$STATE/.fm-capture-output.XXXXXX") || return 1
@@ -2442,7 +2416,7 @@ watcher_capture() {  # <backend> <target> <lines> [expected-label]
   # print a harmless "child setpgid ... Operation not permitted" race from the
   # child before the command's own redirections apply.
   set -m
-  { fm_backend_capture "$@" < /dev/null > "$FM_CAPTURE_OUTPUT" & } 2>/dev/null
+  ( watcher_capture_process "$@" < /dev/null ) > "$FM_CAPTURE_OUTPUT" 2>/dev/null &
   FM_ACTIVE_CHECK_PID=$!
   FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
   set +m
@@ -3308,31 +3282,15 @@ EOF
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
       continue
     fi
-    if ! watcher_capture "$(window_backend "$w")" "$w" 40 "$(window_label "$w")"; then
-      # Binding failure is not a new empty pane render. Preserve the last hash
-      # and its timer so the bounded endpoint probe can name a missing agent,
-      # or keep escalating an unproven binding without inspecting a monitor.
-      if [ "$WATCHER_CAPTURE_BINDING_UNAVAILABLE" = 1 ]; then
-        if afk_present; then
-          # Away-mode triage belongs to the daemon, but it needs a durable
-          # handoff when there is no safe pane to capture. Report once for
-          # this metadata binding, re-arming after a successful capture or
-          # a changed binding, without fabricating a new pane hash.
-          binding_stamp=$(hash_pane < "$STATE/$task.meta" 2>/dev/null) || binding_stamp=unreadable
-          if [ "$(cat "$STATE/.binding-unavailable-$key" 2>/dev/null || true)" != "$binding_stamp" ]; then
-            reason="stale: $w (agent pane binding unavailable; no pane was read - inspect the task metadata and endpoint)"
-            fm_wake_append stale "$w" "$reason" || exit 1
-            printf '%s' "$binding_stamp" > "$STATE/.binding-unavailable-$key" || exit 1
-            wake "$reason"
-          fi
-        elif [ "$kind" != secondmate ]; then
-          wedge_timer_check "$w" "$STATE/.stale-since-$key" "unavailable agent pane" \
-            "$STATE/.wedge-escalations-$key" "$task" "$(cat "$STATE/.hash-$key" 2>/dev/null || true)"
-        fi
+    capture_rc=0
+    watcher_capture "$(window_backend "$w")" "$w" 40 "$(window_label "$w")" || capture_rc=$?
+    if [ "$capture_rc" -ne 0 ]; then
+      if [ "$capture_rc" -eq 2 ] && [ "$kind" != secondmate ]; then
+        wedge_timer_check "$w" "$STATE/.stale-since-$key" "unavailable task I/O" \
+          "$STATE/.wedge-escalations-$key" "$task" "$(cat "$STATE/.hash-$key" 2>/dev/null || true)"
       fi
       continue
     fi
-    rm -f "$STATE/.binding-unavailable-$key"
     tail40=$WATCHER_CAPTURE
     # The matcher is already defined in this shell. It reads the capture this
     # poll already takes, and a miss drops a name the away daemon saved.

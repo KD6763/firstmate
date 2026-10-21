@@ -341,7 +341,7 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # Returns 0 rang, 1 skipped because the composer PROVENLY holds pending text
 # other than our own doorbell (the watcher re-rings later), 2 the backend send
 # failed or its recorded pane could not be verified, 3 skipped because the
-# endpoint is positively dead or missing (nothing
+# lifecycle window is positively dead or missing (nothing
 # typed; recovery owns the record). No return value is delivery proof; the
 # acknowledgement move is the only delivery signal.
 # The skip is deliberately narrow: only an exact `pending` verdict can defer,
@@ -355,7 +355,7 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # rather than skipped; skipping it would block every later ring. On both paths
 # a lost first Enter gets one confirmed retry.
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
-  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict meta inbox target_rc
+  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict meta inbox window window_rc
   if [ "$backend" = tmux ]; then
     fm_backend_source tmux || return 2
     inbox=${rec%/*}
@@ -363,18 +363,32 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
     meta=${inbox%.inbox}.meta
     if [ -f "$meta" ]; then
       [ "$(fm_backend_of_meta "$meta")" = "$backend" ] || return 2
-      if target=$(fm_backend_io_target_of_meta "$meta"); then
-        :
+      if grep -q '^tmux_pane_id=' "$meta"; then
+        window=$(fm_backend_target_of_meta "$meta")
+        case "$window" in *:*:*|:*|*:) return 2 ;; *:*) ;; *) return 2 ;; esac
+        window_rc=0
+        fm_backend_tmux_window_id "${window%%:*}" "${window#*:}" >/dev/null || window_rc=$?
+        [ "$window_rc" -ne 2 ] || return 3
+        [ "$window_rc" -eq 0 ] || return 2
       else
-        target_rc=$?
-        [ "$target_rc" -eq 2 ] && return 3
-        return 2
+        case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
+          dead|missing) return 3 ;;
+        esac
       fi
+      target=$(fm_backend_io_target_of_meta "$meta") || return 2
+    else
+      case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
+        dead|missing) return 3 ;;
+      esac
     fi
+    case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
+      dead|missing) return 2 ;;
+    esac
+  else
+    case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
+      dead|missing) return 3 ;;
+    esac
   fi
-  case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
-    dead|missing) return 3 ;;
-  esac
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
     return 2
   fi

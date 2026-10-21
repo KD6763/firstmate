@@ -1483,10 +1483,11 @@ EOF
 
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
   assert_contains "$out" "endpoint: alive (backend=tmux window=fm-sess:live-window)" "live tmux endpoint not reported alive"
-  assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:split-window)" \
-    "a missing recorded pane with an active monitor was not reported dead"
+  assert_contains "$out" \
+    "endpoint: error (backend=tmux window=fm-sess:split-window - the recorded endpoint identity could not be verified)" \
+    "a missing recorded pane with an active monitor was not reported as unavailable I/O"
 
-  pass "tmux endpoint liveness follows recorded panes despite an active monitor"
+  pass "tmux endpoint reads distinguish unavailable pane I/O from a dead lifecycle window"
 }
 
 test_endpoint_liveness_herdr() {
@@ -1585,6 +1586,48 @@ EOF
   [ "$stray" -eq 0 ] || fail "the per-task read bound left $stray hung herdr process(es) behind"
 
   pass "a hung per-task endpoint read hits its configured bound, reports the task, and leaves nothing stuck"
+}
+
+test_tmux_inventory_hang_is_bounded_and_reported() {
+  local rec root home fakebin out status=0 stray
+  rec=$(new_world endpoint-tmux-inventory-hang)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  make_fake_tmux "$fakebin" "fm-sess:live-window"
+  mv "$fakebin/tmux" "$fakebin/tmux-base"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = list-panes ]; then
+  sleep 300
+  exit 1
+fi
+exec "$(dirname "$0")/tmux-base" "$@"
+SH
+  chmod +x "$fakebin/tmux"
+
+  printf 'window=fm-sess:live-window\ntmux_pane_id=%%1\nkind=ship\n' > "$home/state/task-slow.meta"
+  printf 'working: inventory timeout marker\n' > "$home/state/task-slow.status"
+
+  out=$(FM_HOME_SUMMARY_TIMEOUT=1 FM_SESSION_START_ENDPOINT_TIMEOUT=2 \
+    run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
+
+  expect_code 0 "$status" "a hung tmux pane inventory must not fail the digest"
+  assert_contains "$out" \
+    "endpoint: error (backend=tmux window=fm-sess:live-window - the endpoint read died or hit its 2s bound; the digest continued past it)" \
+    "tmux pane resolution escaped the per-task endpoint bound"
+  assert_contains "$out" "working: inventory timeout marker" \
+    "the bounded tmux inventory read lost the task's status tail"
+  assert_contains "$out" "$(printf '\nCONTEXT\n')" \
+    "a bounded tmux inventory read cost the digest its context section"
+
+  stray=$(pgrep -f "$fakebin/tmux" 2>/dev/null | wc -l | tr -d ' ')
+  [ "$stray" -eq 0 ] || fail "the per-task bound left $stray hung tmux inventory process(es) behind"
+
+  pass "a hung tmux pane inventory stays inside the per-task endpoint bound"
 }
 
 test_endpoint_bound_rejects_padded_zero() {
@@ -3155,6 +3198,7 @@ test_endpoint_liveness_tmux
 test_endpoint_liveness_herdr
 test_endpoint_read_death_is_isolated_and_reported
 test_endpoint_read_hang_is_bounded_and_reported
+test_tmux_inventory_hang_is_bounded_and_reported
 test_endpoint_bound_rejects_padded_zero
 test_perl_timeout_fallback_reports_signal_death_nonzero
 test_abnormal_digest_death_banners_and_exits_zero

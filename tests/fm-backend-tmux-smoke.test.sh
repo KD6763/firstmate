@@ -475,7 +475,7 @@ for _ in $(seq 1 100); do
 done
 [ "$(fm_backend_agent_state tmux "$AGENT_PANE")" = dead ] || fail "original pane did not become an idle shell"
 fm_task_inbox_ring tmux "$PANE_WINDOW" "$PANE_HOME/state/pane.inbox/001.msg" fm-pane
-[ "$?" = 3 ] || fail "a dead original agent must not ring the live monitor"
+[ "$?" = 2 ] || fail "a dead bound pane did not refuse I/O without declaring the window dead"
 : > "$SHIM_DIR/io.log"
 (
   export FM_STATE_OVERRIDE="$PANE_HOME/state"
@@ -496,7 +496,7 @@ printf '%s' "$snapshot" | jq -e --arg pane "$AGENT_PANE" '
   | .endpoint.target == $pane and .endpoint.exists == false
 ' >/dev/null || fail "fleet snapshot mixed pane existence with its lifecycle window: $snapshot"
 fm_task_inbox_ring tmux "$PANE_WINDOW" "$PANE_HOME/state/pane.inbox/001.msg" fm-pane
-[ "$?" = 3 ] || fail "a proven-missing recorded pane did not return recovery-owned ring status 3"
+[ "$?" = 2 ] || fail "a missing recorded pane did not remain an I/O-only refusal"
 pane_send --key Enter && fail "stale original pane fell back to surviving monitor"
 pane_send 'after pane exit' && fail "stale original pane accepted a steer"
 [ ! -s "$SHIM_DIR/monitor.bytes" ] || fail "a refused binding typed into monitor"

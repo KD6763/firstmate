@@ -576,7 +576,7 @@ print_status_tail() {
   done < <(tail -n "$STATUS_TAIL" "$status")
 }
 
-# fm_session_start_endpoint_read <backend> <target> [expected-label]: ONE
+# fm_session_start_endpoint_read <meta> [expected-label]: ONE
 # bounded, crash-isolated endpoint-liveness read. The read runs in its own
 # bash under fm_run_timed's bound instead of in this digest process, because
 # a per-task backend liveness read that dies mid-read would otherwise take
@@ -584,13 +584,15 @@ print_status_tail() {
 # surprise in one task's read into that task's own endpoint line - never a
 # silently missing rest of digest. The inner bash re-sources fm-backend.sh
 # per read; that cost is a few milliseconds per task and buys the isolation.
-fm_session_start_endpoint_read() {  # <backend> <target> [expected-label]
-  local backend=$1 target=$2 label=${3:-}
+fm_session_start_endpoint_read() {  # <meta> [expected-label]
+  local meta=$1 label=${2:-}
   # shellcheck disable=SC2016  # Positional parameters expand inside the child bash, not here.
   fm_run_timed "$ENDPOINT_TIMEOUT" bash -c '
     . "$1"
-    fm_backend_target_exists "$2" "$3" "$4"
-  ' _ "$SCRIPT_DIR/fm-backend.sh" "$backend" "$target" "$label"
+    target=$(fm_backend_io_target_of_meta "$2" 2>/dev/null) || exit 125
+    backend=$(fm_backend_of_meta "$2")
+    fm_backend_target_exists "$backend" "$target" "$3"
+  ' _ "$SCRIPT_DIR/fm-backend.sh" "$meta" "$label"
 }
 
 hash_file_sha256() {
@@ -916,21 +918,14 @@ for meta in "$STATE"/*.meta; do
   cat "$meta"
 
   window=$(fm_meta_get "$meta" window)
-  target=
-  target_rc=0
-  target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
   if [ -n "$window" ]; then
     backend=$(fm_backend_of_meta "$meta")
     endpoint_rc=0
-    if [ "$target_rc" -eq 0 ]; then
-      fm_session_start_endpoint_read "$backend" "$target" "fm-$id" || endpoint_rc=$?
-    else
-      endpoint_rc=1
-    fi
-    # Only the timeout owner's own statuses mean the read itself failed: 124 is
-    # the bound firing and >=128 is a signal death. Every other nonzero status
-    # is the probe's own verdict that the endpoint is gone.
-    if [ "$target_rc" -ne 0 ] && [ "$target_rc" -ne 2 ]; then
+    fm_session_start_endpoint_read "$meta" "fm-$id" || endpoint_rc=$?
+    # The isolated reader reserves 125 for an unavailable endpoint identity;
+    # 124 is the bound firing and >=128 is a signal death. Every other nonzero
+    # status is the probe's own verdict that the endpoint is gone.
+    if [ "$endpoint_rc" -eq 125 ]; then
       printf 'endpoint: error (backend=%s window=%s - the recorded endpoint identity could not be verified)\n' \
         "$backend" "$window"
     elif [ "$endpoint_rc" -eq 0 ]; then
