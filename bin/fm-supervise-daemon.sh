@@ -761,7 +761,7 @@ stale_window_is_busy() {  # <window> <state>
   meta="$state/$task.meta"
   target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
   if [ "$target_rc" -ne 0 ]; then
-    if [ "$backend" = tmux ] && grep -q '^tmux_pane_id=' "$meta"; then
+    if [ -f "$meta" ] && [ "$backend" = tmux ] && grep -q '^tmux_pane_id=' "$meta"; then
       case "$win" in *:*:*|:*|*:) return 1 ;; *:*) ;; *) return 1 ;; esac
       fm_backend_source tmux || return 1
       fm_backend_tmux_window_id "${win%%:*}" "${win#*:}" >/dev/null 2>&1 || window_rc=$?
