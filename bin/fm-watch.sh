@@ -538,7 +538,7 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # Runs for secondmates too: their pane-staleness exemption is about quiet panes
 # being healthy, while an unacknowledged instruction can still be a stuck steer.
 inbox_steer_check() {  # <window> <task>
-  local w=$1 task=$2 action verb rec count tail40 reason='' ring_rc backend agent_state meta bound=0 capture_rc=0
+  local w=$1 task=$2 action verb rec count tail40 reason='' ring_rc backend agent_state meta io_target bound=0 capture_rc=0
   action=$(fm_task_inbox_due_action "$STATE" "$task") || return 0
   verb=${action%% *}
   [ "$verb" != quiet ] || return 0
@@ -563,7 +563,8 @@ inbox_steer_check() {  # <window> <task>
     elif [ "$capture_rc" -eq 2 ]; then
       agent_state=unreadable
     else
-      agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+      io_target=$(fm_meta_get "$meta" tmux_pane_id)
+      agent_state=$(fm_backend_agent_state "$backend" "$io_target" 2>/dev/null || true)
     fi
   else
     agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
@@ -934,12 +935,18 @@ secondmate_busy_class() {  # <window>
 # composer all refuse, so a Kimi or Claude pane without an exact idle
 # verdict is never typed into.
 secondmate_idle_ring_safe() {  # <window>
-  local w=$1 backend agent_state cstate
+  local w=$1 backend agent_state cstate task meta target
   [ -n "$w" ] || return 1
   secondmate_busy_class "$w"
   [ "$SECONDMATE_BUSY_CLASS" = idle ] || return 1
   backend=$(window_backend "$w")
-  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+  target=$w
+  task=$(window_to_task "$w" "$STATE")
+  meta="$STATE/$task.meta"
+  if [ "$backend" = tmux ] && [ -f "$meta" ] && grep -q '^tmux_pane_id=' "$meta"; then
+    target=$(fm_meta_get "$meta" tmux_pane_id)
+  fi
+  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)
   [ "$agent_state" = alive ] || return 1
   watcher_capture "$backend" "$w" 0 "$(window_label "$w")" composer || return 1
   cstate=$WATCHER_CAPTURE

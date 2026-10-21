@@ -44,7 +44,7 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
-Task input stays with the recorded agent pane when another pane is added to its window or selected, closing [issue #7539](https://github.com/kunchenguid/firstmate/issues/7539).
+Task input and its delivery guards stay with the recorded agent pane when another pane is added to its window or selected, closing [issue #7539](https://github.com/kunchenguid/firstmate/issues/7539).
 Relaunch preserves the recorded binding.
 A missing, moved, foreign, malformed, or unreadable binding refuses task input and guarding reads without falling back to another pane.
 Records without a binding retain window-based I/O, including active-pane selection.

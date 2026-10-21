@@ -321,16 +321,20 @@ cat > "$SHIM_DIR/collect" <<'COLLECT'
 #!/usr/bin/env bash
 stty raw -echo
 : > "$1"
-if [ "${2:-}" = pending ]; then
+mode=${2:-}
+if [ "$mode" = pending-agent ]; then
   printf '\033[H\033[2J╭────────────╮\r\n│ pending    │\r\n╰────────────╯\033[2;4H'
 else
   printf 'collector-ready\r\n'
 fi
-exec cat >> "$1"
+case "$mode" in
+  agent|pending-agent) exec -a codex cat >> "$1" ;;
+  *) exec cat >> "$1" ;;
+esac
 COLLECT
 chmod +x "$SHIM_DIR/collect"
 PANE_WINDOW="$SESSION:fm-pane"
-printf -v collector_cmd 'bash %q %q' "$SHIM_DIR/collect" "$SHIM_DIR/agent.bytes"
+printf -v collector_cmd 'bash %q %q agent' "$SHIM_DIR/collect" "$SHIM_DIR/agent.bytes"
 AGENT_PANE=$(tmux new-window -dP -F '#{pane_id}' -t "$SESSION:" -n fm-pane "$collector_cmd") \
   || fail "real tmux: could not start original byte collector"
 wait_for_capture_text "$AGENT_PANE" collector-ready || fail "original collector did not start"
@@ -384,10 +388,17 @@ assert_agent_only_reads_and_writes
   || fail "focus-race hook did not run"
 pass "real tmux: re-rings and a focus change between typing and Enter preserve the agent pane"
 
-# Exercise the actual watcher as well as its shared ring helper. It owns only
-# this fixture home and the private tmux socket inherited through PATH.
+tmux respawn-pane -k -t "$MONITOR_PANE" "env PS1='monitor-shell-ready> ' bash --noprofile --norc -i"
+wait_for_capture_text "$MONITOR_PANE" monitor-shell-ready || fail "idle-shell monitor did not start"
+tmux select-pane -t "$MONITOR_PANE"
+[ "$(fm_backend_agent_state tmux "$PANE_WINDOW")" = dead ] \
+  || fail "focused idle-shell monitor was not classified dead through the window target"
+[ "$(fm_backend_agent_state tmux "$AGENT_PANE")" = alive ] \
+  || fail "recorded agent pane was not classified alive"
+
 cp "$SHIM_DIR/agent.bytes" "$SHIM_DIR/before-watch.bytes"
 touch -t 202001010000 "$PANE_HOME/state/pane.inbox/001.msg"
+: > "$SHIM_DIR/io.log"
 FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PANE_HOME/state" \
   FM_CONFIG_OVERRIDE="$PANE_HOME/config" FM_DATA_OVERRIDE="$PANE_HOME/data" \
   FM_POLL=1 FM_HEARTBEAT=999999 FM_CHECK_INTERVAL=999999 FM_TASK_INBOX_GRACE_SECS=1 \
@@ -399,18 +410,55 @@ for _ in $(seq 1 100); do
   [ ! -s "$PANE_HOME/state/pane.inbox/.ring-state" ] || break
   sleep 0.1
 done
+[ -s "$PANE_HOME/state/pane.inbox/.ring-state" ] || fail "watcher did not complete its delivery attempt"
+cmp -s "$SHIM_DIR/before-watch.bytes" "$SHIM_DIR/agent.bytes" \
+  && fail "watcher did not deliver the aged steer: $(cat "$SHIM_DIR/watch.out")"
+assert_agent_only_reads_and_writes
+monitor_capture=$(fm_backend_tmux_capture "$MONITOR_PANE" 40)
+printf '%s\n' "$monitor_capture" | grep -F 'Firstmate instruction waiting' >/dev/null \
+  && fail "ordinary watcher delivery reached the focused idle-shell monitor"
+pass "real tmux: ordinary watcher delivery ignores a focused idle-shell monitor"
+
+mv "$PANE_HOME/state/pane.inbox/001.msg" "$PANE_HOME/state/pane.inbox/handled/" \
+  || fail "could not acknowledge the ordinary delivery fixture"
+: > "$PANE_HOME/config/wait-no-turns"
+retry_rec=$(fm_task_inbox_write "$PANE_HOME/state" pane "retry this one-shot steer" fire-and-forget) \
+  || fail "could not write the explicit retry-ring fixture"
+fm_task_inbox_mark_retry "$PANE_HOME/state" pane "$retry_rec" \
+  || fail "could not arm the explicit retry-ring fixture"
+touch -t 202001010000 "$PANE_HOME/state/pane.inbox/.retry-ring"
+cp "$SHIM_DIR/agent.bytes" "$SHIM_DIR/before-watch.bytes"
+: > "$SHIM_DIR/io.log"
+for _ in $(seq 1 100); do
+  [ -e "$PANE_HOME/state/pane.inbox/.retry-ring" ] || break
+  sleep 0.1
+done
 kill "$PANE_WATCH_PID" 2>/dev/null || true
 wait "$PANE_WATCH_PID" 2>/dev/null || true
 PANE_WATCH_PID=
-[ -s "$PANE_HOME/state/pane.inbox/.ring-state" ] || fail "watcher did not complete its retry"
+[ ! -e "$PANE_HOME/state/pane.inbox/.retry-ring" ] \
+  || fail "watcher did not complete the explicit retry ring: $(cat "$SHIM_DIR/watch.out")"
 cmp -s "$SHIM_DIR/before-watch.bytes" "$SHIM_DIR/agent.bytes" \
-  && fail "watcher did not retry the aged steer: $(cat "$SHIM_DIR/watch.out")"
-[ ! -s "$SHIM_DIR/monitor.bytes" ] || fail "watcher retry reached the monitor"
-pass "real tmux: the watcher retries an aged steer in the recorded pane with the monitor active"
+  && fail "focused idle-shell monitor vetoed the explicit retry ring: $(cat "$SHIM_DIR/watch.out")"
+assert_agent_only_reads_and_writes
+monitor_capture=$(fm_backend_tmux_capture "$MONITOR_PANE" 40)
+printf '%s\n' "$monitor_capture" | grep -F 'Firstmate instruction waiting' >/dev/null \
+  && fail "explicit watcher retry reached the focused idle-shell monitor"
+pass "real tmux: explicit watcher retry ignores a focused idle-shell monitor"
+mv "$retry_rec" "$PANE_HOME/state/pane.inbox/handled/" \
+  || fail "could not retire the explicit retry fixture"
+mv "$PANE_HOME/state/pane.inbox/handled/001.msg" "$PANE_HOME/state/pane.inbox/" \
+  || fail "could not restore the ordinary delivery fixture"
+rm "$PANE_HOME/config/wait-no-turns"
+
+printf -v collector_cmd 'bash %q %q' "$SHIM_DIR/collect" "$SHIM_DIR/monitor.bytes"
+tmux respawn-pane -k -t "$MONITOR_PANE" "$collector_cmd"
+wait_for_capture_text "$MONITOR_PANE" collector-ready || fail "monitor collector did not restart"
+tmux select-pane -t "$MONITOR_PANE"
 
 # Force the existing submit core to retry Enter against a static bordered
 # pending composer. This only exercises routing, not a vendor's screen shape.
-printf -v collector_cmd 'bash %q %q pending' "$SHIM_DIR/collect" "$SHIM_DIR/agent.bytes"
+printf -v collector_cmd 'bash %q %q pending-agent' "$SHIM_DIR/collect" "$SHIM_DIR/agent.bytes"
 tmux respawn-pane -k -t "$AGENT_PANE" "$collector_cmd"
 wait_for_capture_text "$AGENT_PANE" pending || fail "retry collector did not start"
 [ "$(fm_backend_composer_state tmux "$AGENT_PANE")" = pending ] || fail "retry fixture lacks a proven pending composer"
