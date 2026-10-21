@@ -491,10 +491,16 @@ fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta" >/dev/null 2>&1
 snapshot=$(FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PANE_HOME/state" \
   FM_CONFIG_OVERRIDE="$PANE_HOME/config" FM_DATA_OVERRIDE="$PANE_HOME/data" \
   bash "$ROOT/bin/fm-fleet-snapshot.sh" --json) || fail "fleet snapshot failed for a removed bound pane"
-printf '%s' "$snapshot" | jq -e --arg pane "$AGENT_PANE" '
+printf '%s' "$snapshot" | jq -e --arg window "$PANE_WINDOW" '
   .tasks[] | select(.id == "pane")
-  | .endpoint.target == $pane and .endpoint.exists == false
-' >/dev/null || fail "fleet snapshot mixed pane existence with its lifecycle window: $snapshot"
+  | .endpoint.target == $window and .endpoint.exists == true
+' >/dev/null || fail "fleet snapshot changed lifecycle health when only the bound pane disappeared: $snapshot"
+bearings=$(FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PANE_HOME/state" \
+  FM_CONFIG_OVERRIDE="$PANE_HOME/config" FM_DATA_OVERRIDE="$PANE_HOME/data" \
+  bash "$ROOT/bin/fm-bearings-snapshot.sh" --json) || fail "Bearings failed for a live window with a removed bound pane"
+printf '%s' "$bearings" | jq -e '
+  [.unhealthy_endpoints[]? | select(.id == "pane")] | length == 0
+' >/dev/null || fail "Bearings marked a live lifecycle window unhealthy for a missing bound pane: $bearings"
 fm_task_inbox_ring tmux "$PANE_WINDOW" "$PANE_HOME/state/pane.inbox/001.msg" fm-pane
 [ "$?" = 2 ] || fail "a missing recorded pane did not remain an I/O-only refusal"
 pane_send --key Enter && fail "stale original pane fell back to surviving monitor"
@@ -509,6 +515,19 @@ fm_backend_tmux_kill "$(fm_backend_target_of_meta "$PANE_HOME/state/pane.meta")"
   || fail "lifecycle cleanup lost its window target"
 fm_backend_target_exists tmux "$MONITOR_PANE" && fail "window cleanup left monitor pane"
 tmux has-session -t "$OTHER_SESSION" || fail "cleanup touched another session"
+snapshot=$(FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PANE_HOME/state" \
+  FM_CONFIG_OVERRIDE="$PANE_HOME/config" FM_DATA_OVERRIDE="$PANE_HOME/data" \
+  bash "$ROOT/bin/fm-fleet-snapshot.sh" --json) || fail "fleet snapshot failed for a missing lifecycle window"
+printf '%s' "$snapshot" | jq -e --arg window "$PANE_WINDOW" '
+  .tasks[] | select(.id == "pane")
+  | .endpoint.target == $window and .endpoint.exists == false
+' >/dev/null || fail "fleet snapshot lost main's missing-window lifecycle health: $snapshot"
+bearings=$(FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PANE_HOME/state" \
+  FM_CONFIG_OVERRIDE="$PANE_HOME/config" FM_DATA_OVERRIDE="$PANE_HOME/data" \
+  bash "$ROOT/bin/fm-bearings-snapshot.sh" --json) || fail "Bearings failed for a missing lifecycle window"
+printf '%s' "$bearings" | jq -e '
+  [.unhealthy_endpoints[]? | select(.id == "pane" and .exists == false)] | length == 1
+' >/dev/null || fail "Bearings did not retain main's missing-window health result: $bearings"
 pass "real tmux: lifecycle cleanup retains the whole-window target"
 
 MOVED_WINDOW="$SESSION:fm-moved"

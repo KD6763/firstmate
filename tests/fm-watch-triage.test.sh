@@ -3924,24 +3924,32 @@ test_gone_endpoint_reports_once_instead_of_escalating_forever() {
 }
 
 test_missing_pane_binding_keeps_window_lifecycle_and_delivery_ladder() {
-  local dir state fakebin out window key rec pid action
+  local dir state fakebin out window key rec pid action since
   window='test:fm-bound-window'; key=$(printf '%s' "$window" | tr ':/.' '___')
   dir=$(make_case missing-bound-pane); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
   printf 'window=%s\nkind=ship\nharness=grok\nbackend=tmux\ntmux_pane_id=%%2\n' "$window" > "$state/bound.meta"
-  printf 'paused: waiting on an external review\n' > "$state/bound.status"
+  printf 'working: processing the next turn\n' > "$state/bound.status"
   prime_status_seen "$state" "$state/bound.status"
   rec=$(FM_STATE_OVERRIDE="$state" bash -c '
     . "$1"
     fm_task_inbox_write "$2" bound "inspect this durable steer"
   ' _ "$ROOT/bin/fm-task-inbox-lib.sh" "$state") || fail "could not write the bound-pane inbox fixture"
   set_mtime "$(( $(date +%s) - 2000 ))" "$rec"
+  since=$(( $(date +%s) - 500 ))
+  printf '%s\n' "$since" > "$state/.stale-since-$key"
 
   FM_FAKE_TMUX_LOG="$dir/tmux.log" FM_FAKE_TMUX_WINDOWS=fm-bound-window \
     FM_FAKE_TMUX_PANES='%1' FM_FAKE_TMUX_ALL_PANES='%1' \
-    FM_FAKE_TMUX_CURRENT_COMMAND=grok FM_FAKE_CREW_STATE='state: paused · source: status-log · waiting' \
+    FM_FAKE_TMUX_CURRENT_COMMAND=grok FM_FAKE_CREW_STATE='state: working · source: run-step · monitor busy' \
     watch_bg "$state" "$fakebin" "$out" env FM_TASK_INBOX_GRACE_SECS=999
   pid=$!
   wait_poll_cycle "$state" "$pid" || { reap "$pid"; fail "the live-window missing-pane case exited as lifecycle death"; }
+  [ "$(cat "$state/.stale-since-$key" 2>/dev/null || true)" = "$since" ] \
+    || { reap "$pid"; fail "the missing pane changed the live window's existing supervision timer"; }
+  [ ! -e "$state/.wedge-escalations-$key" ] \
+    || { reap "$pid"; fail "the missing pane advanced a refusal-driven wedge escalation"; }
+  [ "$(wedge_stale_wakes "$state" "$window")" -eq 0 ] \
+    || { reap "$pid"; fail "the missing pane queued a refusal-driven stale wake"; }
   action=$(FM_STATE_OVERRIDE="$state" bash -c '
     . "$1"
     fm_task_inbox_due_action "$2" bound
@@ -3978,7 +3986,7 @@ test_missing_pane_binding_keeps_window_lifecycle_and_delivery_ladder() {
   if grep -E 'capture-pane|send-keys' "$dir/tmux.log" >/dev/null; then
     fail "the missing lifecycle window routed I/O to another pane: $(cat "$dir/tmux.log")"
   fi
-  pass "a missing pane refuses I/O while only a missing window enters recovery"
+  pass "a missing pane refuses I/O without changing supervision while only a missing window enters recovery"
 }
 
 # The load-bearing direction. A genuinely wedged LIVE agent must escalate exactly

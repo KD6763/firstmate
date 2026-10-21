@@ -2391,11 +2391,15 @@ fm_capture_output_cleanup() {
 # so a stop is not held for a blocked read (watcher_stop_signals). The group is
 # recorded like a check's, so watcher_cleanup stops a read still in flight.
 watcher_capture_process() {  # <backend> <target> <lines> [expected-label] [capture|composer]
-  local meta target=$2
+  local meta state target=$2
   if [ "$1" = tmux ]; then
     meta=$(fm_backend_meta_for_window "$2" "$STATE" 2>/dev/null || true)
     if [ -n "$meta" ]; then
-      target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || return 2
+      target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || {
+        state=$(fm_backend_agent_state "$1" "$2" 2>/dev/null) || state=unreadable
+        case "$state" in dead|missing) return 3 ;; esac
+        return 2
+      }
     fi
   fi
   case "${5:-capture}" in
@@ -3285,8 +3289,8 @@ EOF
     capture_rc=0
     watcher_capture "$(window_backend "$w")" "$w" 40 "$(window_label "$w")" || capture_rc=$?
     if [ "$capture_rc" -ne 0 ]; then
-      if [ "$capture_rc" -eq 2 ] && [ "$kind" != secondmate ]; then
-        wedge_timer_check "$w" "$STATE/.stale-since-$key" "unavailable task I/O" \
+      if [ "$capture_rc" -eq 3 ]; then
+        wedge_timer_check "$w" "$STATE/.stale-since-$key" "non-terminal stale" \
           "$STATE/.wedge-escalations-$key" "$task" "$(cat "$STATE/.hash-$key" 2>/dev/null || true)"
       fi
       continue
