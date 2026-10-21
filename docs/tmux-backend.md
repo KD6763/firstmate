@@ -44,12 +44,12 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
-Task input stays with the original agent pane when another pane is added to its window or selected, closing [issue #7539](https://github.com/kunchenguid/firstmate/issues/7539).
-Relaunch preserves that pane.
-Cleanup keeps the task window as its lifecycle target, but first refuses a moved or unreadable valid binding before closing the endpoint or removing durable state.
-Older records without a pane binding retain baseline non-destructive input and observation through the task window's sole remaining pane, so a moved agent pane can leave those reads following a monitor until the record is retired and freshly spawned with a binding.
-Control and automatic recovery refuse unbound records; teardown retains the pre-binding window-based behavior under the [unbound-task upgrade procedure](agent-control.md#upgrading-unbound-tmux-tasks).
-`fm_backend_io_target_of_meta` and `fm_backend_agent_authority_target_of_meta` in `bin/fm-backend.sh` own the pane-routing contracts, under which an ambiguous split or a stale binding refuses input ([issue #7539](https://github.com/kunchenguid/firstmate/issues/7539)).
+Task input stays with the recorded agent pane when another pane is added to its window or selected, closing [issue #7539](https://github.com/kunchenguid/firstmate/issues/7539).
+Relaunch preserves the recorded binding.
+A missing, moved, foreign, malformed, or unreadable binding refuses task input and guarding reads without falling back to another pane.
+Records without a binding retain window-based I/O, including active-pane selection.
+Lifecycle control, relaunch checks, recovery, and teardown retain their existing window-based behavior for both bound and unbound records.
+`fm_backend_io_target_of_meta` in `bin/fm-backend.sh` owns the I/O routing contract.
 
 ### Agent liveness probe
 
@@ -58,7 +58,7 @@ Task endpoint resolution first verifies the bound pane or exact window membershi
 Together they classify recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, Rovo, and AGY process identities as `alive`, common shells as `dead`, an absent bound pane or window as `missing` only when readable inventory proves that absence, unreadable or unproven state as `unreadable`, and every other process as `ambiguous`.
 Tmux absence is judged on the selected tmux server under the same single-server assumption as baseline behavior because task records carry no socket identity; recording socket identity is tracked in [issue #7590](https://github.com/kunchenguid/firstmate/issues/7590).
 The process-name vocabulary behind those verdicts is owned by `bin/fm-agent-process-lib.sh` and shared with the Herdr adapter, which proves a registered agent against the same names ([herdr-backend.md](herdr-backend.md) "Restart and liveness behavior").
-Authority-bearing paths require a durable pane binding first, then only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.
+Only `dead` and `missing` authorize recovery because a false dead result could launch a duplicate agent.
 
 For positive attribution, the probe combines two independent name sources rather than making either one load-bearing.
 `#{pane_current_command}` and the pane tty foreground process group's kernel `comm` values expose different name fields, and which one retains executable identity is platform-dependent.
@@ -116,7 +116,6 @@ Without that baseline, an `unknown` verdict is preserved untouched, so a busy-lo
 
 ```sh
 tests/fm-backend-tmux-smoke.test.sh
-tests/fm-teardown.test.sh
 tests/fm-tmux-agent-liveness.test.sh
 tests/fm-harness-liveness-drift-live-e2e.test.sh
 tests/fm-composer-ghost.test.sh

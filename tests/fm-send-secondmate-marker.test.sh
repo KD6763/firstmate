@@ -55,17 +55,11 @@ case "${1:-}" in
       printf '%s' "${1:-}" >> "$FM_SEND_LOG"
     fi
     exit 0 ;;
-  list-panes) printf '%%1\n'; exit 0 ;;
   display-message)
-    case "$*" in *'#{pane_id}'*) printf '%%1\n'; exit 0 ;; esac
     for a in "$@"; do case "$a" in *cursor_y*) printf '1\n'; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane) printf '╭────╮\n│    │\n╰────╯\n'; exit 0 ;;
-  list-windows)
-    case "$*" in
-      *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|fm-domain\n@2|1|fm-build\n@3|2|win\n@4|3|window\n'; exit 0 ;;
-    esac
-    printf '%s\n' fm-domain fm-build win window; exit 0 ;;
+  list-windows) printf '%s\n' fm-domain fm-build win window; exit 0 ;;
 esac
 exit 0
 SH

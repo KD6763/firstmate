@@ -25,8 +25,6 @@ set -u
 
 # shellcheck source=tests/lib.sh disable=SC1091
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# shellcheck source=tests/tmux-fixtures.sh
-. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
 TMP_ROOT=$(fm_test_tmproot fm-bootstrap-tests)
@@ -856,7 +854,6 @@ make_routine_bootstrap_fixture() {
     printf 'harness=codex\n'
     printf 'home=%s\n' "$sm"
   } > "$home/state/sm.meta"
-  fm_test_bind_tmux_meta "$home/state/sm.meta"
   fakebin=$(make_fake_toolchain "$case_dir")
   add_real_jq "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
@@ -874,7 +871,6 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
-  fm_test_tmux_protocol "$fakebin/tmux"
   printf '%s|%s|%s\n' "$root" "$home" "$fakebin"
 }
 
@@ -1016,7 +1012,7 @@ test_network_phases_record_per_step_elapsed_times() {
   fm_git_add_origin "$case_dir/home/projects/alpha" "$case_dir/alpha-origin"
   # A secondmate the liveness sweep must account for. Whatever verdict it reaches
   # is owned elsewhere; what matters here is that the step is measured.
-  fm_write_bound_secondmate_meta "$case_dir/home/state/mate-a.meta" "$case_dir/home"
+  fm_write_secondmate_meta "$case_dir/home/state/mate-a.meta" "$case_dir/home"
 
   log="$case_dir/timings.tsv"
   PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$ROOT" \

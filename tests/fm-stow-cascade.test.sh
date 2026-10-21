@@ -56,8 +56,6 @@ cat > "$FAKEBIN/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
 case "$*" in
-  *list-windows*'#{window_id}|#{window_index}|#{window_name}'*)
-    [ -z "${FM_FAKE_TMUX_WINDOW:-}" ] || printf '@1|0|%s\n' "$FM_FAKE_TMUX_WINDOW" ;;
   *list-windows*) printf '%s\n' "${FM_FAKE_TMUX_WINDOW:-}" ;;
   *list-panes*) printf '%s\n' "${FM_FAKE_TMUX_PANE:-}" ;;
   *display-message*'#{pane_current_command}'*) printf '%s\n' "${FM_FAKE_TMUX_COMMAND:-claude}" ;;
@@ -215,7 +213,6 @@ test_transport_routes_by_placement_and_liveness() {
     remote_record remote-live remote-mac "$TMP_ROOT/remote-root" "$remote"
   } > "$primary/data/secondmates.md"
   fm_write_secondmate_meta "$primary/state/live-local.meta" "$live" 'firstmate:fm-live-local' alpha claude
-  printf '%s\n' 'tmux_pane_id=%1' >> "$primary/state/live-local.meta"
   fm_write_secondmate_meta "$primary/state/remote-live.meta" "$remote" 'fm-remote:fm-remote-live' alpha claude
   printf 'role=secondmate\neffective_budget_tokens=7500\ntotal_estimated_tokens=100\nbudget_status=within-budget\n' \
     > "$TMP_ROOT/remote-budget.txt"
@@ -223,7 +220,6 @@ test_transport_routes_by_placement_and_liveness() {
   set +e
   out=$(run_cascade "$primary" \
     FM_FAKE_TMUX_WINDOW='fm-live-local' \
-    FM_FAKE_TMUX_PANE='%1' \
     FM_FAKE_REMOTE_BUDGET="$TMP_ROOT/remote-budget.txt" \
     FM_FAKE_REMOTE_AGENT_STATE=alive)
   set -e
@@ -244,7 +240,6 @@ test_transport_routes_by_placement_and_liveness() {
   set +e
   out=$(run_cascade "$primary" \
     FM_FAKE_TMUX_WINDOW='fm-live-local' \
-    FM_FAKE_TMUX_PANE='%1' \
     FM_FAKE_REMOTE_BUDGET="$TMP_ROOT/remote-budget.txt" \
     FM_FAKE_REMOTE_AGENT_STATE=dead)
   set -e
@@ -254,30 +249,6 @@ test_transport_routes_by_placement_and_liveness() {
   assert_contains "$s" 'no remote memory write path' \
     "the deferred remote home did not state why it cannot be curated in place"
   pass "transport follows placement and live-agent state, and a remote home without an agent defers"
-}
-
-test_unbound_legacy_home_never_selects_direct_mutation() {
-  local primary home out rc s
-  primary=$(new_primary legacy-unbound)
-  home=$(new_home legacy-local)
-  local_record legacy-local "$home" > "$primary/data/secondmates.md"
-  fm_write_secondmate_meta "$primary/state/legacy-local.meta" "$home" \
-    'firstmate:fm-legacy-local' alpha claude
-
-  set +e
-  out=$(run_cascade "$primary" \
-    FM_FAKE_TMUX_WINDOW='fm-legacy-local' \
-    FM_FAKE_TMUX_PANE='%1' \
-    FM_FAKE_TMUX_COMMAND=zsh)
-  rc=$?
-  set -e
-  expect_code 3 "$rc" "an unbound legacy home must remain unavailable for direct curation"
-  s=$(stanza "$out" legacy-local)
-  [ "$(value_in "$s" transport)" = unavailable ] \
-    || fail "an unbound legacy home selected $(value_in "$s" transport) instead of unavailable"
-  assert_contains "$s" 'task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)' \
-    "the stow refusal did not explain how to establish authority"
-  pass "an unbound legacy home never grants direct mutation authority"
 }
 
 test_receipt_facts_are_complete_and_show_before_and_after() {
@@ -394,7 +365,6 @@ test_no_cascade_without_secondmates_or_from_a_secondmate_home() {
 test_budget_is_enforced_per_home_and_never_summed
 test_every_registered_home_is_enumerated_exactly_once
 test_transport_routes_by_placement_and_liveness
-test_unbound_legacy_home_never_selects_direct_mutation
 test_receipt_facts_are_complete_and_show_before_and_after
 test_a_slow_remote_is_bounded_and_the_rest_still_report
 test_no_cascade_without_secondmates_or_from_a_secondmate_home

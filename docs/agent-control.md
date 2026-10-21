@@ -176,19 +176,6 @@ The worktree and the task's records are unaffected either way.
   An `alive`, `ambiguous`, or `unreadable` verdict all refuse, and so does any endpoint whose absence is not provable, which on tmux is every `missing`; absence is claimed only from positive evidence of it.
   It also requires the shell to be in the recorded worktree: every backend but Orca (which owns its own task worktree with no current-path probe) gets one explicit `cd` to the recorded path, then a pre-launch path read that refuses before any harness starts unless it confirms the endpoint is sitting in the recorded copy.
 
-## Upgrading unbound tmux tasks
-
-An in-flight tmux task created before pane binding has no recorded `tmux_pane_id`.
-It must finish or be retired and freshly spawned; `fm-control relaunch` and automatic secondmate recovery cannot establish its agent identity.
-A single surviving pane is insufficient proof because the agent could have moved while a monitor remained.
-
-Continue or exit the agent from its own terminal, preserving its work and any required report or handoff before retiring the task.
-Run `bin/fm-teardown.sh <task-id>` from the owning home and use the normal fresh-spawn path with the retained brief.
-Records without `tmux_pane_id` retain the existing window-based teardown behavior; pane identity checks apply only when the record carries that field, including an invalid or empty value.
-If the record also lacks `spawn_gen`, use the attended `bin/fm-teardown.sh <task-id> --legacy-record` retirement; its existing endpoint-state and landed-work gates are owned by the teardown header.
-A refused teardown leaves the record and work in place: satisfy the reported endpoint, landed-work, or completion requirement before retrying, without adding a pane id by hand or using `--force` to bypass preservation.
-Secondmate retirement also requires its child tasks and outstanding replies to be resolved under the normal teardown contract.
-
 ## Capability matrix
 
 Backend capability comes from each adapter's real surface, not from a policy choice.
@@ -209,5 +196,4 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 
 - `tests/fm-control.test.sh` - the adapter contract for its verified-harness lane (adapters outside the lane pin their control mechanics in their own harness suites), the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, and marker non-regression, all against a stubbed session provider.
 - `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, checkpoint refusals, rollback after a failed launch, and the endpoint-absence proof both verbs share - the Herdr reclaim of a destroyed endpoint, and tmux refusing one it cannot prove absent.
-- `tests/fm-teardown.test.sh` - the tmux pane-authority preflight, including bound-pane membership, moved and unreadable refusals, legacy window-teardown compatibility, and preservation of task state and neighboring panes.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.

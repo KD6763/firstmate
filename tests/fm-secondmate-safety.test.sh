@@ -611,7 +611,7 @@ EOF
     log="$TMP_ROOT/spawn-binding-$case_name-fake/tmux.log"
     err="$TMP_ROOT/spawn-binding-$case_name.err"
     if [ "$case_name" = metadata-mismatch ]; then
-      fm_write_bound_secondmate_meta "$home/state/domain.meta" "$sub"
+      fm_write_secondmate_meta "$home/state/domain.meta" "$sub"
       meta_before="$TMP_ROOT/spawn-binding-$case_name.meta.before"
       cp "$home/state/domain.meta" "$meta_before"
       if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" \
@@ -1660,7 +1660,7 @@ test_branch_actor_cannot_retire_secondmate() {
   mkdir -p "$home/state" "$home/data" "$subhome/state"
   printf 'domain\n' > "$subhome/.fm-secondmate-home"
   subhome_abs=$(cd "$subhome" && pwd -P)
-  fm_write_bound_secondmate_meta "$home/state/domain.meta" "$subhome"
+  fm_write_secondmate_meta "$home/state/domain.meta" "$subhome"
   printf 'done: child PR merged\n' > "$home/state/domain.status"
   printf '%s\n' '- domain - design domain (home: '"$subhome"'; scope: design domain; projects: alpha; added 2026-06-22)' > "$home/data/secondmates.md"
   fakebin=$(make_fake_tmux "$TMP_ROOT/branch-retire-fake")
@@ -1685,7 +1685,7 @@ test_secondmate_teardown_refuses_ambiguous_and_mismatched_registry_bindings() {
     other="$TMP_ROOT/teardown-binding-$case_name-other"
     mkdir -p "$home/state" "$home/data" "$sub/state" "$sub/data" "$sub/config" "$sub/projects" "$other"
     printf 'domain\n' > "$sub/.fm-secondmate-home"
-    fm_write_bound_secondmate_meta "$home/state/domain.meta" "$sub"
+    fm_write_secondmate_meta "$home/state/domain.meta" "$sub"
     case "$case_name" in
       duplicate-id)
         cat > "$home/data/secondmates.md" <<EOF
@@ -1736,7 +1736,7 @@ test_secondmate_teardown_sweeps_process_events_before_removal() {
   printf 'runner\n' > "$subhome/state/procevent/source.runner"
   install_fake_process_event_sweep "$subhome" "$sweep_log"
   subhome_abs=$(cd "$subhome" && pwd -P)
-  fm_write_bound_secondmate_meta "$home/state/domain.meta" "$subhome"
+  fm_write_secondmate_meta "$home/state/domain.meta" "$subhome"
   printf '%s\n' '- domain - design domain (home: '"$subhome"'; scope: design domain; projects: alpha; added 2026-06-22)' > "$home/data/secondmates.md"
   fakebin=$(make_fake_tmux "$TMP_ROOT/procevent-teardown-fake")
   log="$TMP_ROOT/procevent-teardown-fake/tmux.log"
@@ -1763,7 +1763,7 @@ test_secondmate_teardown_refuses_process_events_without_sweep_script() {
   printf 'domain\n' > "$subhome/.fm-secondmate-home"
   printf 'adapter=lavish\n' > "$subhome/state/procevent/source.source"
   printf '%s\n999999\ntoken\nidentity\n' "$subhome" > "$claim_root/source.claim"
-  fm_write_bound_secondmate_meta "$home/state/domain.meta" "$subhome"
+  fm_write_secondmate_meta "$home/state/domain.meta" "$subhome"
   printf '%s\n' '- domain - design domain (home: '"$subhome"'; scope: design domain; projects: alpha; added 2026-06-22)' > "$home/data/secondmates.md"
   fakebin=$(make_fake_tmux "$TMP_ROOT/procevent-refusal-fake")
   log="$TMP_ROOT/procevent-refusal-fake/tmux.log"
@@ -1796,7 +1796,7 @@ test_secondmate_teardown_preserves_process_events_on_later_refusal() {
   install_fake_process_event_sweep "$subhome" "$sweep_log"
   printf 'FMX_PAIRING_TOKEN=test-token\n' > "$home/.env"
   printf 'work_home=secondmate:domain\nwork_id=domain\n' > "$home/state/public-followup/registry/obligation"
-  fm_write_bound_secondmate_meta "$home/state/domain.meta" "$subhome"
+  fm_write_secondmate_meta "$home/state/domain.meta" "$subhome"
   printf '%s\n' '- domain - design domain (home: '"$subhome"'; scope: design domain; projects: alpha; added 2026-06-22)' > "$home/data/secondmates.md"
   fakebin=$(make_fake_tmux "$TMP_ROOT/procevent-later-refusal-fake")
   log="$TMP_ROOT/procevent-later-refusal-fake/tmux.log"
@@ -1837,8 +1837,8 @@ test_secondmate_force_teardown_sweeps_nested_homes() {
   install_fake_process_event_sweep "$childhome" "$sweep_log"
   subhome_abs=$(cd "$subhome" && pwd -P)
   childhome_abs=$(cd "$childhome" && pwd -P)
-  fm_write_bound_secondmate_meta "$home/state/domain.meta" "$subhome"
-  fm_write_bound_secondmate_meta "$subhome/state/nested.meta" "$childhome"
+  fm_write_secondmate_meta "$home/state/domain.meta" "$subhome"
+  fm_write_secondmate_meta "$subhome/state/nested.meta" "$childhome"
   cat > "$home/data/secondmates.md" <<EOF
 - domain - design domain (home: $subhome; scope: design domain; projects: alpha; added 2026-06-22)
 - nested - nested domain (home: $childhome; scope: nested domain; projects: beta; added 2026-06-22)
@@ -1879,9 +1879,9 @@ test_secondmate_force_teardown_preserves_nested_restore_status() {
   printf 'adapter=lavish\n' > "$grandchildhome/state/procevent/leaf-source.source"
   install_fake_process_event_sweep "$grandchildhome" "$sweep_log"
   : > "$rearm_log"
-  fm_write_bound_secondmate_meta "$home/state/domain.meta" "$subhome"
-  fm_write_bound_secondmate_meta "$subhome/state/nested.meta" "$childhome"
-  fm_write_bound_secondmate_meta "$childhome/state/leaf.meta" "$grandchildhome"
+  fm_write_secondmate_meta "$home/state/domain.meta" "$subhome"
+  fm_write_secondmate_meta "$subhome/state/nested.meta" "$childhome"
+  fm_write_secondmate_meta "$childhome/state/leaf.meta" "$grandchildhome"
   cat > "$home/data/secondmates.md" <<EOF
 - domain - design domain (home: $subhome; scope: design domain; projects: alpha; added 2026-06-22)
 - nested - nested domain (home: $childhome; scope: nested domain; projects: beta; added 2026-06-22)
@@ -2309,7 +2309,7 @@ SH
         printf 'repo-domain\n' > "$subhome/.fm-secondmate-home"
         ;;
     esac
-    fm_write_bound_secondmate_meta "$home/state/$tid.meta" "$subhome"
+    fm_write_secondmate_meta "$home/state/$tid.meta" "$subhome"
     printf -- '- %s - design domain (home: %s; scope: design domain; projects: alpha; added 2026-06-22)\n' \
       "$tid" "$subhome" > "$home/data/secondmates.md"
     fakebin=$(make_fake_tmux "$base/fake")

@@ -370,7 +370,7 @@ test_busy_inbox_escalation_reaches_supervision() {
   "$ROOT/bin/fm-busy-event.sh" apply "$state" "$task" busy --gen "$gen" \
     --source claude-hook --event UserPromptSubmit
   printf 'Question awaiting an answer\n' > "$pane"
-  PATH="$dir/fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$win" FM_FAKE_TMUX_CAPTURE="$pane" \
+  PATH="$dir/fakebin:$PATH" FM_FAKE_TMUX_CAPTURE="$pane" \
     stale_window_is_busy "$win" "$state" || fail "inbox consumer fixture is not busy"
   case "$variant" in
     stuck)

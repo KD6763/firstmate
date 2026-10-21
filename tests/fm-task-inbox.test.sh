@@ -95,7 +95,6 @@ case "${1:-}" in
   display-message)
     for a in "$@"; do
       case "$a" in
-        *pane_id*) printf '%%1\n'; exit 0 ;;
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) [ -z "${FM_FAKE_TMUX_AGENT:-}" ] || { printf '%s\n' "$FM_FAKE_TMUX_AGENT"; exit 0; } ;;
         *pane_tty*) [ -z "${FM_FAKE_TMUX_AGENT:-}" ] || { printf '\n'; exit 0; } ;;
@@ -109,17 +108,7 @@ case "${1:-}" in
       printf '╭────╮\n│    │\n╰────╯\n'
     fi
     exit 0 ;;
-  list-panes)
-    [ "${FM_FAKE_TMUX_UNREADABLE:-0}" != 1 ] || exit 1
-    [ "${FM_FAKE_TMUX_MISSING:-0}" != 1 ] || exit 0
-    printf '%%1\n'; exit 0 ;;
-  list-windows)
-    [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 0
-    case "$*" in
-      *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|fm-t1\n' ;;
-      *) printf 'fm-t1\n' ;;
-    esac
-    exit 0 ;;
+  list-windows) [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] || printf 'fm-t1\n'; exit 0 ;;
 esac
 exit 0
 SH
@@ -281,7 +270,6 @@ test_ring_skips_dead_agent() {
   mkdir -p "$state"
   make_watch_stubs "$dir" >/dev/null
   rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
-  printf 'window=sess:fm-t1\ntmux_pane_id=%%1\nharness=claude\nkind=ship\n' > "$state/t1.meta"
   log="$dir/send.log"; : > "$log"
   rc=0
   PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_AGENT=zsh \
@@ -292,14 +280,9 @@ test_ring_skips_dead_agent() {
   rc=0
   PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_MISSING=1 \
     inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1 || rc=$?
-  [ "$rc" = 3 ] || fail "a proven-missing pane should return 3 from the ring, got $rc"
+  [ "$rc" = 3 ] || fail "a missing endpoint should return 3 from the ring, got $rc"
   [ ! -s "$log" ] || fail "a missing endpoint was typed into:"$'\n'"$(cat "$log")"
   [ -f "$rec" ] || fail "skipping a missing endpoint must leave the durable record in place"
-  rc=0
-  PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_UNREADABLE=1 \
-    inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1 || rc=$?
-  [ "$rc" = 2 ] || fail "an unreadable pane inventory should return 2 from the ring, got $rc"
-  [ ! -s "$log" ] || fail "an unreadable endpoint was typed into:"$'\n'"$(cat "$log")"
   rc=0
   PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_TMUX_AGENT=claude \
     inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1 || rc=$?
@@ -347,7 +330,7 @@ case "${1:-}" in
     fi
     exit 0 ;;
   display-message)
-    case "$*" in *'#{pane_id}'*) printf '%%1\n'; exit 0 ;; *cursor_y*) printf '2\n'; exit 0 ;; esac
+    case "$*" in *cursor_y*) printf '2\n'; exit 0 ;; esac
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
     rule=$(printf '─%.0s' $(seq 64))
@@ -359,13 +342,7 @@ case "${1:-}" in
     fi
     printf '%s\n  ? for shortcuts\n' "$rule"
     exit 0 ;;
-  list-panes) printf '%%1\n'; exit 0 ;;
-  list-windows)
-    case "$*" in
-      *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|fm-t1\n' ;;
-      *) printf 'fm-t1\n' ;;
-    esac
-    exit 0 ;;
+  list-windows) printf 'fm-t1\n'; exit 0 ;;
 esac
 exit 0
 SH

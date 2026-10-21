@@ -49,45 +49,18 @@ new_world() {
 #!/usr/bin/env bash
 set -u
 case "${1:-}" in
+  list-windows) cat "$FM_FAKE_DIR/windows" ;;
   display-message)
     target=
-    format=
-    previous=
     for arg in "$@"; do
-      [ "$previous" != -t ] || target=$arg
-      previous=$arg
-      case "$arg" in '#{'*) format=$arg ;; esac
+      case "$arg" in main:fm-*) target=$arg ;; esac
     done
-    case "$format" in
-      *pane_id*) printf '%s\n' "$target" ;;
+    case "${*: -1}" in
       *pane_current_command*)
-        if [ "$target" = %2 ]; then
-          printf 'zsh\n'
-        else
-          id=${target##*fm-}
-          [ "$target" != %1 ] || id=sm1
-          if [ -e "$FM_FAKE_DIR/dead-$id" ]; then
-            printf 'zsh\n'
-          elif [ -e "$FM_FAKE_DIR/monitor-$id" ] && [ "$target" != %1 ]; then
-            printf 'zsh\n'
-          else
-            printf 'claude\n'
-          fi
-        fi
+        id=${target##*fm-}
+        if [ -e "$FM_FAKE_DIR/dead-$id" ]; then printf 'zsh\n'; else printf 'claude\n'; fi
         ;;
       *) printf '\n' ;;
-    esac
-    ;;
-  list-panes)
-    printf '%%1\n'
-    [ ! -e "$FM_FAKE_DIR/monitor-sm1" ] || printf '%%2\n'
-    ;;
-  list-windows)
-    case "$*" in
-      *'#{window_id}|#{window_index}|#{window_name}'*)
-        awk '{ printf "@%d|%d|%s\n", NR, NR - 1, $0 }' "$FM_FAKE_DIR/windows"
-        ;;
-      *) cat "$FM_FAKE_DIR/windows" ;;
     esac
     ;;
 esac
@@ -134,7 +107,6 @@ add_sm() {
     printf 'kind=secondmate\n'
     printf 'harness=%s\n' "$harness"
     [ -z "$backend" ] || printf 'backend=%s\n' "$backend"
-    [ -n "$backend" ] || printf 'tmux_pane_id=%%1\n'
     printf 'home=%s/%s\n' "$w" "$id"
   } > "$w/home/state/$id.meta"
   printf 'fm-%s\n' "$id" >> "$w/fake/windows"
@@ -271,22 +243,6 @@ test_dead_secondmate_gets_no_action() {
   assert_contains "$out" "restart-secondmates: none" "a stopped mate must not be sent to restart"
   assert_contains "$out" "nudge-secondmates: none" "a stopped mate must not receive a queued nudge"
   pass "T3d an already-stopped secondmate is left to startup recovery"
-}
-
-test_active_monitor_does_not_hide_live_secondmate() {
-  local w out
-  w=$(new_world t3d-monitor)
-  add_sm "$w" sm1
-  : > "$w/fake/monitor-sm1"
-  bump_origin "$w" instr
-
-  out=$(run_update "$w")
-
-  assert_contains "$out" "restart-secondmates: fm-sm1" \
-    "an active idle monitor hid the recorded live secondmate pane"
-  assert_contains "$out" "nudge-secondmates: none" \
-    "a pane-bound restart was incorrectly downgraded to a nudge"
-  pass "T3d monitor focus cannot hide a live recorded secondmate pane"
 }
 
 # --- T3e: a legacy remote advance still restarts ---------------------------
@@ -605,7 +561,6 @@ test_reread_gate_is_instruction_only
 test_bin_only_advance_restarts
 test_unprovable_runtime_gets_fallback_nudge
 test_dead_secondmate_gets_no_action
-test_active_monitor_does_not_hide_live_secondmate
 test_legacy_remote_advance_restarts
 test_dirty_secondmate_skipped
 test_diverged_secondmate_skipped

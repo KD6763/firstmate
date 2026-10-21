@@ -441,8 +441,16 @@ rm "$SHIM_DIR/focus"
 
 cp "$PANE_HOME/state/pane.meta" "$SHIM_DIR/bound.meta"
 sed '/^tmux_pane_id=/d' "$SHIM_DIR/bound.meta" > "$PANE_HOME/state/pane.meta"
-pane_send --key Enter && fail "ambiguous legacy split window accepted a key"
-grep -q 'no unambiguous agent pane' "$SHIM_DIR/send.err" || fail "legacy split refusal lacks a diagnostic"
+[ "$(fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta")" = "$PANE_WINDOW" ] \
+  || fail "legacy split window lost its window-based I/O target"
+pane_send --key Enter || fail "legacy split window no longer accepts active-pane I/O"
+for _ in $(seq 1 100); do
+  [ ! -s "$SHIM_DIR/monitor.bytes" ] || break
+  sleep 0.01
+done
+[ -s "$SHIM_DIR/monitor.bytes" ] || fail "legacy I/O did not reach the active pane"
+: > "$SHIM_DIR/monitor.bytes"
+pass "real tmux: unbound split windows retain active-pane I/O"
 cp "$SHIM_DIR/bound.meta" "$PANE_HOME/state/pane.meta"
 FOREIGN_PANE=$(tmux display-message -p -t "$OTHER_SESSION:" '#{pane_id}')
 sed "s/^tmux_pane_id=.*/tmux_pane_id=$FOREIGN_PANE/" "$SHIM_DIR/bound.meta" > "$PANE_HOME/state/pane.meta"
@@ -468,13 +476,6 @@ done
 [ "$(fm_backend_agent_state tmux "$AGENT_PANE")" = dead ] || fail "original pane did not become an idle shell"
 fm_task_inbox_ring tmux "$PANE_WINDOW" "$PANE_HOME/state/pane.inbox/001.msg" fm-pane
 [ "$?" = 3 ] || fail "a dead original agent must not ring the live monitor"
-probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
-  . "$1"
-  fm_secondmate_liveness_probe "$2" pane poll
-  printf "%s|%s|%s" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_KILL"
-' _ "$ROOT/bin/fm-secondmate-liveness-lib.sh" "$PANE_HOME/state/pane.meta")
-[ "$probe" = 'relaunchable|dead|1' ] \
-  || fail "secondmate liveness followed the active monitor: $probe"
 : > "$SHIM_DIR/io.log"
 (
   export FM_STATE_OVERRIDE="$PANE_HOME/state"
@@ -483,7 +484,7 @@ probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
   stale_window_is_busy "$PANE_WINDOW" "$PANE_HOME/state"
 ) || true
 assert_agent_only_reads_and_writes
-pass "real tmux: task liveness and stale triage read the recorded agent with the monitor active"
+pass "real tmux: stale triage reads the recorded agent with the monitor active"
 tmux kill-pane -t "$AGENT_PANE"
 fm_backend_io_target_of_meta "$PANE_HOME/state/pane.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "a removed original pane was not proven missing with its monitor alive"
@@ -494,20 +495,13 @@ printf '%s' "$snapshot" | jq -e --arg pane "$AGENT_PANE" '
   .tasks[] | select(.id == "pane")
   | .endpoint.target == $pane and .endpoint.exists == false
 ' >/dev/null || fail "fleet snapshot mixed pane existence with its lifecycle window: $snapshot"
-probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
-  . "$1"
-  fm_secondmate_liveness_probe "$2" pane poll
-  printf "%s|%s|%s" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_KILL"
-' _ "$ROOT/bin/fm-secondmate-liveness-lib.sh" "$PANE_HOME/state/pane.meta")
-[ "$probe" = 'relaunchable|missing|1' ] \
-  || fail "a missing agent pane did not retain its surviving window for lifecycle cleanup: $probe"
 fm_task_inbox_ring tmux "$PANE_WINDOW" "$PANE_HOME/state/pane.inbox/001.msg" fm-pane
 [ "$?" = 3 ] || fail "a proven-missing recorded pane did not return recovery-owned ring status 3"
 pane_send --key Enter && fail "stale original pane fell back to surviving monitor"
 pane_send 'after pane exit' && fail "stale original pane accepted a steer"
 [ ! -s "$SHIM_DIR/monitor.bytes" ] || fail "a refused binding typed into monitor"
 [ -f "$PANE_HOME/state/pane.inbox/001.msg" ] || fail "pane refusal lost an existing durable steer"
-pass "real tmux: ambiguous legacy, mismatched, duplicate and stale pane bindings fail closed"
+pass "real tmux: mismatched, duplicate and stale pane bindings fail closed"
 
 # Window lifecycle identity remains separate: cleanup closes the whole window,
 # including its remaining split, and leaves a different session intact.
@@ -528,8 +522,7 @@ tmux join-pane -d -s "$MOVED_PANE" -t "$FOREIGN_PANE" \
 fm_backend_target_exists tmux "$MOVED_WINDOW" && fail "moved pane left its original window alive"
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 [ "$?" = 1 ] || fail "a moved live pane was mistaken for a missing endpoint"
-fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta" >/dev/null 2>&1
-[ "$?" = 1 ] || fail "a moved legacy pane was mistaken for a missing endpoint"
+[ "$(fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta")" = "$MOVED_WINDOW" ] || fail "legacy missing-window target changed"
 tmux kill-pane -t "$MOVED_PANE"
 touch "$SHIM_DIR/fail-global-pane-inventory"
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
@@ -537,12 +530,6 @@ fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 rm "$SHIM_DIR/fail-global-pane-inventory"
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "a readable global inventory did not prove a missing window binding absent"
-fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta" >/dev/null 2>&1
-[ "$?" = 1 ] || fail "a missing legacy window authorized recovery without agent identity"
-touch "$SHIM_DIR/fail-global-window-inventory"
-fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta" >/dev/null 2>&1
-[ "$?" = 1 ] || fail "an unreadable server inventory proved a legacy binding absent"
-rm "$SHIM_DIR/fail-global-window-inventory"
 pass "real tmux: moved, absent and unreadable missing-window bindings remain distinct"
 
 LEGACY_LIVE_WINDOW="$SESSION:fm-legacy-moved"
@@ -558,7 +545,7 @@ printf 'window=%s\nharness=codex\nkind=secondmate\n' "$LEGACY_LIVE_WINDOW" \
   > "$PANE_HOME/state/legacy-moved.meta"
 tmux join-pane -d -s "$LEGACY_LIVE_AGENT" -t "$FOREIGN_PANE" \
   || fail "real tmux: could not move the legacy agent away from its monitor"
-[ "$(fm_backend_io_target_of_meta "$PANE_HOME/state/legacy-moved.meta")" = "$LEGACY_LIVE_MONITOR" ] \
+[ "$(fm_backend_io_target_of_meta "$PANE_HOME/state/legacy-moved.meta")" = "$LEGACY_LIVE_WINDOW" ] \
   || fail "legacy-compatible I/O did not follow the recorded window's remaining pane"
 peek=$(FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PANE_HOME/state" \
   FM_CONFIG_OVERRIDE="$PANE_HOME/config" FM_DATA_OVERRIDE="$PANE_HOME/data" \
@@ -566,27 +553,27 @@ peek=$(FM_HOME="$PANE_HOME" FM_ROOT_OVERRIDE="$PANE_HOME" FM_STATE_OVERRIDE="$PA
   || fail "legacy-compatible peek could not read the remaining monitor"
 printf '%s\n' "$peek" | grep -q legacy-monitor-ready \
   || fail "legacy-compatible peek no longer matches baseline remaining-pane behavior"
-authority_error=$(fm_backend_agent_authority_target_of_meta \
-  "$PANE_HOME/state/legacy-moved.meta" 2>&1)
-[ "$?" = 1 ] || fail "an unbound moved-agent record granted lifecycle authority"
-printf '%s\n' "$authority_error" | grep -Fq 'task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)' \
-  || fail "the strict target refusal was not actionable: $authority_error"
-probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
+# Recovery remains window-based for both unbound and bound records, including
+# bindings whose pane has moved. Compare the public probe's observable result.
+legacy_probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
   . "$1"
   fm_secondmate_liveness_probe "$2" legacy-moved poll
   printf "%s|%s|%s|%s" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_KILL" "$FM_SM_LIVE_REASON"
 ' _ "$ROOT/bin/fm-secondmate-liveness-lib.sh" "$PANE_HOME/state/legacy-moved.meta")
-[ "$probe" = 'skipped|unreadable|0|task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)' ] \
-  || fail "legacy secondmate recovery gained authority from its surviving monitor: $probe"
-fm_backend_target_exists tmux "$LEGACY_LIVE_AGENT" \
-  || fail "authority refusal did not preserve the moved live agent"
-pass "real tmux: moved legacy agents retain baseline reads but grant no recovery authority"
+printf 'tmux_pane_id=%s\n' "$LEGACY_LIVE_AGENT" >> "$PANE_HOME/state/legacy-moved.meta"
+bound_probe=$(STATE="$PANE_HOME/state" FM_ROOT="$ROOT" bash -c '
+  . "$1"
+  fm_secondmate_liveness_probe "$2" legacy-moved poll
+  printf "%s|%s|%s|%s" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_KILL" "$FM_SM_LIVE_REASON"
+' _ "$ROOT/bin/fm-secondmate-liveness-lib.sh" "$PANE_HOME/state/legacy-moved.meta")
+[ "$bound_probe" = "$legacy_probe" ] || fail "pane metadata changed recovery behavior: $bound_probe versus $legacy_probe"
+fm_backend_target_exists tmux "$LEGACY_LIVE_AGENT" || fail "read-only recovery probe touched the agent"
+pass "real tmux: recovery retains window-based behavior for bound and unbound records"
 
 tmux kill-server
 fm_backend_io_target_of_meta "$PANE_HOME/state/moved.meta" >/dev/null 2>&1
 [ "$?" = 2 ] || fail "an authoritatively absent tmux server became an unreadable pane binding"
-fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta" >/dev/null 2>&1
-[ "$?" = 2 ] || fail "an authoritatively absent tmux server became an unproven legacy binding"
+[ "$(fm_backend_io_target_of_meta "$PANE_HOME/state/moved-legacy.meta")" = "$MOVED_WINDOW" ] || fail "legacy target resolution changed after server exit"
 pass "real tmux: whole-server absence remains a proven missing endpoint"
 
 cleanup_all

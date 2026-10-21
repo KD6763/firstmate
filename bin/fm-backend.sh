@@ -380,8 +380,8 @@ fm_backend_target_of_meta() {  # <meta-file>
 }
 
 # Resolve task I/O separately from its lifecycle window. For tmux, the recorded
-# tmux_pane_id must still belong to that exact window. Legacy metadata may use
-# its sole pane; a split window without a binding is ambiguous and refuses.
+# tmux_pane_id must still belong to that exact window. Legacy metadata without
+# that field retains its window-based I/O, including active-pane selection.
 # Other backends already record a pane/surface/terminal and remain unchanged.
 # A failed read is never permission to fall back to the active pane.
 # For tmux, status 2 proves the recorded endpoint is missing; status 1 leaves
@@ -392,33 +392,17 @@ fm_backend_io_target_of_meta() {  # <meta-file>
     fm_backend_target_of_meta "$meta"
     return
   fi
-  window=$(fm_backend_meta_exact_value "$meta" window) || return 1
-  if grep -q '^tmux_pane_id=' "$meta"; then
-    pane=$(fm_backend_meta_exact_value "$meta" tmux_pane_id) || {
-      echo "error: malformed tmux_pane_id in $meta; refusing task I/O" >&2
-      return 1
-    }
+  if ! grep -q '^tmux_pane_id=' "$meta"; then
+    fm_backend_target_of_meta "$meta"
+    return
   fi
+  window=$(fm_backend_meta_exact_value "$meta" window) || return 1
+  pane=$(fm_backend_meta_exact_value "$meta" tmux_pane_id) || {
+    echo "error: malformed tmux_pane_id in $meta; refusing task I/O" >&2
+    return 1
+  }
   fm_backend_source tmux || return 1
   fm_backend_tmux_task_pane "$window" "$pane"
-}
-
-fm_backend_agent_authority_target_of_meta() {  # <meta-file>
-  local meta=$1 pane_count
-  if [ "$(fm_backend_of_meta "$meta")" = tmux ]; then
-    pane_count=$(grep -c '^tmux_pane_id=' "$meta" 2>/dev/null || true)
-    if [ "$pane_count" -eq 0 ]; then
-      echo "error: task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" >&2
-      return 1
-    fi
-    if [ "$pane_count" -eq 1 ]; then
-      fm_backend_meta_exact_value "$meta" tmux_pane_id >/dev/null 2>&1 || {
-        echo "error: task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" >&2
-        return 1
-      }
-    fi
-  fi
-  fm_backend_io_target_of_meta "$meta"
 }
 
 # fm_backend_validate_task_endpoint: validate a task cleanup record entirely

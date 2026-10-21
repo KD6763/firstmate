@@ -65,7 +65,7 @@ case "${1:-}" in
     literal=0
     while [ $# -gt 0 ]; do
       case "$1" in
-        -t) printf '%s\n' "$2" >> "$D/targets"; shift 2 ;;
+        -t) shift 2 ;;
         -l) literal=1; shift ;;
         *) break ;;
       esac
@@ -104,7 +104,6 @@ case "${1:-}" in
   display-message)
     for a in "$@"; do
       case "$a" in
-        *pane_id*) printf '%%9\n'; exit 0 ;;
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
         *pane_current_path*)
@@ -140,17 +139,7 @@ case "${1:-}" in
       echo 'lost server' >&2
       exit 1
     fi
-    if [ -f "$D/windows" ]; then
-      case "$*" in
-        *'#{window_id}|#{window_index}|#{window_name}'*) sed 's/^/@9|0|/' "$D/windows" ;;
-        *) cat "$D/windows" ;;
-      esac
-    fi
-    exit 0 ;;
-  list-panes)
-    printf '%%9\n'
-    [ ! -e "$D/split" ] || printf '%%10\n'
-    exit 0 ;;
+    [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
   new-session)
     # Nothing in the relaunch path may ever create a session; recording the
     # call is how a refusal test proves that.
@@ -223,7 +212,6 @@ Preserve the task while replacing its agent process.
 EOF
   {
     echo "window=$ses:fm-$id"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=$id"
     echo "worktree=$wt"
     echo "project=$proj"
@@ -380,7 +368,6 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   local dir out rc gen_before gen_after
   dir=$(new_case same rl1)
   add_ship_task "$dir" rl1 claude
-  : > "$dir/fake/split"
   gen_before=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl1)
   printf 'busy_gen=%s\n' "$gen_before" >> "$dir/home/state/rl1.meta"
   out=$(run_control "$dir" rl1 relaunch --note "stopped mid-refactor"); rc=$?
@@ -388,11 +375,6 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   assert_contains "$out" "relaunched rl1 harness=claude from=claude" "the outcome should name the transition"
   [ "$(meta_field "$dir" rl1 window)" = "fmses:fm-rl1" ] \
     || fail "the endpoint must be reused, not recreated"
-  [ "$(meta_field "$dir" rl1 tmux_pane_id)" = '%9' ] \
-    || fail "relaunch must preserve the original pane binding"
-  [ -s "$dir/fake/targets" ] || fail "relaunch sent no input"
-  [ "$(sort -u "$dir/fake/targets")" = '%9' ] \
-    || fail "relaunch addressed the active split instead of its recorded pane"
   [ "$(meta_field "$dir" rl1 worktree)" = "$dir/wt" ] \
     || fail "the worktree must be reused, not reallocated"
   [ "$(meta_field "$dir" rl1 kind)" = ship ] || fail "kind must survive the relaunch"
@@ -482,6 +464,28 @@ test_relaunch_from_linked_home_preserves_recorded_worktree() {
   assert_grep 'unfinished task work' "$dir/wt/task.txt" "relaunch discarded unfinished task work"
   [ ! -e "$fetch_head" ] || fail "relaunch fetched instead of preserving the recorded copy"
   pass "fm-control relaunch: a linked spawning home preserves committed and unfinished work in the recorded copy"
+}
+
+test_pane_metadata_survives_relaunch_without_new_refusals() {
+  local dir out rc binding before after
+  for binding in absent %1 %999999 invalid empty duplicate; do
+    dir=$(new_case "pane-parity-$binding" rl-pane)
+    add_ship_task "$dir" rl-pane claude
+    case "$binding" in
+      absent) ;;
+      empty) printf 'tmux_pane_id=\n' >> "$dir/home/state/rl-pane.meta" ;;
+      duplicate) printf 'tmux_pane_id=%%1\ntmux_pane_id=%%2\n' >> "$dir/home/state/rl-pane.meta" ;;
+      *) printf 'tmux_pane_id=%s\n' "$binding" >> "$dir/home/state/rl-pane.meta" ;;
+    esac
+    before=$(sed -n '/^tmux_pane_id=/p' "$dir/home/state/rl-pane.meta")
+    out=$(run_control "$dir" rl-pane relaunch --note "continue the same work"); rc=$?
+    expect_code 0 "$rc" "relaunch changed with $binding pane metadata"$'\n'"$out"
+    after=$(sed -n '/^tmux_pane_id=/p' "$dir/home/state/rl-pane.meta")
+    [ "$after" = "$before" ] || fail "relaunch changed the existing pane field"
+    [ "$(meta_field "$dir" rl-pane window)" = fmses:fm-rl-pane ] || fail "relaunch changed its window"
+    [ ! -s "$dir/fake/created-windows" ] || fail "relaunch unexpectedly created an endpoint"
+  done
+  pass "fm-control relaunch: pane fields survive without adding lifecycle refusals or adoption"
 }
 
 test_relaunch_preserves_durable_task_metadata() {
@@ -1002,7 +1006,6 @@ SH
     printf '%s openai-codex/gpt-5.5\n' "$harness" > "$dir/home/config/secondmate-harness"
     {
       printf 'window=fmses:fm-%s\nendpoint_task_id=%s\n' "$id" "$id"
-      printf 'tmux_pane_id=%%9\n'
       printf 'worktree=%s\nproject=%s\nhome=%s\n' "$dir/wt" "$dir/wt" "$dir/wt"
       printf 'harness=%s\nkind=secondmate\nmode=secondmate\nyolo=off\nmodel=default\neffort=default\n' "$harness"
     } > "$dir/home/state/$id.meta"
@@ -1190,7 +1193,6 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin() {
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
   {
     echo "window=fmses:fm-sm3"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm3"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1234,7 +1236,6 @@ test_secondmate_claude_relaunch_keeps_local_settings() {
   printf 'gen=retired\n' > "$dir/smhome/.fm-busy-stop"
   {
     echo "window=fmses:fm-sml"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sml"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1274,7 +1275,6 @@ test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop() {
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
   {
     echo "window=fmses:fm-sm6"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm6"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1316,7 +1316,6 @@ test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop() {
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
   {
     echo "window=fmses:fm-sm7"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm7"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1355,7 +1354,6 @@ test_explicit_secondmate_harness_ignores_configured_profile_axes() {
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
   {
     echo "window=fmses:fm-sm4"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm4"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1441,7 +1439,6 @@ test_promoted_scout_relaunch_receives_the_current_delivery_contract() {
     mv "$brief.filled" "$brief"
     {
       echo "window=fmses:fm-$id"
-      echo "tmux_pane_id=%9"
       echo "endpoint_task_id=$id"
       echo "worktree=$dir/wt"
       echo "project=$dir/proj"
@@ -1784,7 +1781,6 @@ test_secondmate_relaunch_checkpoints_child_work_and_spares_the_charter() {
   printf 'window=x:fm-c2\n' > "$dir/smhome/state/c2.meta"
   {
     echo "window=fmses:fm-sm1"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm1"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1824,7 +1820,6 @@ test_secondmate_relaunch_refuses_an_unmarked_home() {
   printf 'someone-else\n' > "$dir/smhome/.fm-secondmate-home"
   {
     echo "window=fmses:fm-sm2"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm2"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1853,7 +1848,6 @@ test_secondmate_checkpoint_refuses_unreadable_child_state() {
   printf 'sm5\n' > "$dir/smhome/.fm-secondmate-home"
   {
     echo "window=fmses:fm-sm5"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm5"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -1904,7 +1898,6 @@ test_secondmate_checkpoint_ignores_a_vanished_scratch_find_walk() {
   : > "$dir/smhome/state/.last-0"
   {
     echo "window=fmses:fm-sm6"
-    echo "tmux_pane_id=%9"
     echo "endpoint_task_id=sm6"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
@@ -2040,30 +2033,6 @@ test_spawn_relaunch_refuses_a_live_agent() {
   assert_contains "$out" "positively agent-free endpoint" "the refusal should demand an agent-free endpoint"
   assert_contains "$out" "fm-control.sh rl15 exit" "the refusal should point at the way to stop it"
   pass "fm-spawn --relaunch: refuses to launch a second agent into a live endpoint"
-}
-
-test_unbound_legacy_relaunch_refuses_before_any_authority_action() {
-  local dir out rc before
-  dir=$(new_case legacy-unbound rl76)
-  add_ship_task "$dir" rl76 claude
-  sed '/^tmux_pane_id=/d' "$dir/home/state/rl76.meta" > "$dir/home/state/rl76.meta.next"
-  mv "$dir/home/state/rl76.meta.next" "$dir/home/state/rl76.meta"
-  before=$(cksum "$dir/home/state/rl76.meta" "$dir/home/data/rl76/brief.md")
-
-  out=$(run_spawn "$dir" rl76 --relaunch --harness claude); rc=$?
-  expect_code 1 "$rc" "direct relaunch must refuse an unbound legacy task"
-  assert_contains "$out" "task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" \
-    "direct relaunch did not explain the missing authority binding"
-  [ ! -s "$dir/fake/literal" ] || fail "direct relaunch sent input before refusing the unbound record"
-
-  out=$(run_control "$dir" rl76 relaunch --note "must remain untouched"); rc=$?
-  expect_code 1 "$rc" "control relaunch must refuse an unbound legacy task"
-  assert_contains "$out" "task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" \
-    "control relaunch did not explain the missing authority binding"
-  [ ! -s "$dir/fake/literal" ] || fail "control relaunch stopped or launched an agent before refusing"
-  [ "$(cksum "$dir/home/state/rl76.meta" "$dir/home/data/rl76/brief.md")" = "$before" ] \
-    || fail "an unbound relaunch refusal changed task metadata or instructions"
-  pass "unbound legacy records cannot authorize either relaunch path"
 }
 
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection() {
@@ -2280,8 +2249,8 @@ test_reclaim_refuses_an_unreadable_endpoint() {
 
   out=$(run_spawn "$dir" rl63 --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "an unreadable endpoint must still refuse"
-  assert_contains "$out" "cannot resolve exact tmux window" \
-    "an unreadable window cannot establish a pane to relaunch into"
+  assert_contains "$out" "positively agent-free endpoint" \
+    "only a POSITIVELY proven agent-free endpoint may be relaunched into"
   assert_absent "$dir/fake/created-windows" \
     "a refused relaunch must not create an endpoint"
   [ ! -s "$dir/fake/literal" ] || fail "a refused relaunch must launch nothing"
@@ -2888,7 +2857,6 @@ test_concurrent_relaunch_is_refused
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock
 test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution
 test_spawn_relaunch_refuses_a_live_agent
-test_unbound_legacy_relaunch_refuses_before_any_authority_action
 test_spawn_relaunch_refuses_a_symlinked_task_record_before_inspection
 test_spawn_relaunch_keeps_its_early_meta_lock_continuous
 test_spawn_relaunch_refuses_a_pending_authoritative_close
@@ -2910,3 +2878,5 @@ test_herdr_rebind_failure_from_a_plain_shell_names_the_real_cause
 test_relaunch_reverifies_an_already_in_flight_item_instead_of_rewriting_it
 test_relaunch_moves_a_drifted_item_back_in_flight
 test_away_branch_relaunch_accepts_existing_dispatchable_items
+
+test_pane_metadata_survives_relaunch_without_new_refusals

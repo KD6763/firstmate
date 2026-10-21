@@ -462,6 +462,7 @@ test_final_endpoint_resolution_failure_cleans_up() {
   err="$dir/send.err"
   count="$dir/list-panes.count"
   fm_write_secondmate_meta "$dir/home/state/domain.meta" "$dir/home" "sess:fm-domain"
+  printf 'tmux_pane_id=%%1\n' >> "$dir/home/state/domain.meta"
   run_send "$dir" "$err" \
     FM_FAKE_TMUX_LIST_PANES_COUNT="$count" FM_FAKE_TMUX_FAIL_LIST_PANES_AT=2 -- \
     domain "must not leave a reply expectation"

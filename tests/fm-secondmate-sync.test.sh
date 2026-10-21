@@ -1239,10 +1239,10 @@ test_bootstrap_syncs_remote_home_to_primary_commit() {
   mkdir -p "$home/config" "$home/projects"
   printf -- '- sm - remote fixture (host: host-sm; root: %s; home: %s; scope: remote work; projects: alpha; added 2026-08-02)\n' \
     "$w/coderoot" "$w/sm" > "$home/data/secondmates.md"
-  fm_write_bound_secondmate_meta "$home/state/sm.meta" "$w/sm"
+  fm_write_secondmate_meta "$home/state/sm.meta" "$w/sm"
   printf 'remote_host=host-sm\n' >> "$home/state/sm.meta"
   mkdir -p "$w/sm/state/parent-route"
-  fm_write_tmux_meta "$w/sm/state/parent-route/sm.meta" \
+  fm_write_meta "$w/sm/state/parent-route/sm.meta" \
     'window=fm-remote:p1' 'endpoint_task_id=sm' 'worktree=-' 'project=-' \
     'backend=herdr' 'harness=codex' 'herdr_session=fm-remote' \
     'herdr_workspace_id=w1' 'herdr_tab_id=t1' 'herdr_pane_id=p1'
@@ -1282,7 +1282,7 @@ test_bootstrap_reports_outdated_host_actionably() {
   mkdir -p "$home/config" "$home/projects"
   printf -- '- sm - remote fixture (host: host-sm; root: %s; home: %s; scope: remote work; projects: alpha; added 2026-08-02)\n' \
     "$w/coderoot" "$w/sm" > "$home/data/secondmates.md"
-  fm_write_bound_secondmate_meta "$home/state/sm.meta" "$w/sm"
+  fm_write_secondmate_meta "$home/state/sm.meta" "$w/sm"
   printf 'remote_host=host-sm\n' >> "$home/state/sm.meta"
 
   fakebin=$(make_remote_leg_ssh_stub "$w")
@@ -1320,7 +1320,7 @@ remote_nudge_world() {  # <name> -> world dir with a remote home sm on the prima
   mkdir -p "$w/home/config" "$w/home/projects"
   printf -- '- sm - remote fixture (host: host-sm; root: %s; home: %s; scope: remote work; projects: alpha; added 2026-08-02)\n' \
     "$w/coderoot" "$w/sm" > "$w/home/data/secondmates.md"
-  fm_write_bound_secondmate_meta "$w/home/state/sm.meta" "$w/sm"
+  fm_write_secondmate_meta "$w/home/state/sm.meta" "$w/sm"
   printf 'remote_host=host-sm\n' >> "$w/home/state/sm.meta"
   printf '%s\n' "$w"
 }

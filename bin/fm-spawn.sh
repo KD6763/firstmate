@@ -1578,23 +1578,13 @@ spawn_abort_cleanup() {
     SPAWN_META_LOCK_HELD=0
     fm_lock_release "$SPAWN_META_LOCK" || true
   fi
-  # Every fresh tmux window remains abort-owned until a launch is sent, for
-  # every harness. A pre-launch failure closes its lifecycle window; once any
-  # launch is sent, this path deliberately leaves the endpoint untouched.
-  if [ "$status" -ne 0 ] && [ "${BACKEND:-}" = tmux ] &&
-    [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] && [ "$SPAWN_LAUNCH_SENT" = 0 ] &&
-    [ "$RELAUNCH" -eq 0 ] && [ -n "${T:-}" ]; then
-    SPAWN_FRESH_ENDPOINT_OPENED=0
-    if fm_backend_kill tmux "${TMUX_WINDOW_TARGET:-$T}" 2>/dev/null; then
-      SPAWN_ENDPOINT_CLOSED=1
-    else
-      echo "warning: could not close tmux endpoint ${TMUX_WINDOW_TARGET:-$T} after the failed spawn of $ID; close it by hand before retrying" >&2
-    fi
-  fi
-  # A fresh polytoken spawn that fails and leaves no record must leave its
-  # harness-owned wiring as it found it. Once a launch was delivered into an
-  # endpoint still open, a worker may be running there, so those stay for the
-  # operator, as the refusal says.
+  # A fresh polytoken spawn that fails and leaves no record must leave the pool
+  # as it found it. Before its launch is delivered, the endpoint it opened holds nothing but
+  # the shell whose `treehouse get` leases the slot, so closing it returns the
+  # slot to the pool and leaves no window or tab for a retry to trip over; the
+  # Firstmate wiring, task temp root, and staged launch file it wrote go with it.
+  # Once a launch was delivered into an endpoint still open, a worker may be
+  # running there, so those stay for the operator, as the refusal says.
   if [ "$status" -ne 0 ] && [ "${HARNESS:-}" = polytoken ] &&
     { [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] || [ "$SPAWN_FRESH_WIRING_PENDING" = 1 ] ||
       [ "$SPAWN_TASK_TMP_CREATED" = 1 ] || [ -n "$SPAWN_STAGED_LAUNCH_FILE" ]; } &&
@@ -2109,7 +2099,6 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fm_backend_validate_task_endpoint "$RELAUNCH_META" "$ID" || exit 1
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
-  RELAUNCH_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$RELAUNCH_META") || exit 1
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
   # A relaunch must PROVE the previous agent is gone before it launches another
@@ -2148,7 +2137,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # owns that vocabulary). The proof itself lives in one place for the whole
   # control plane - fm_control_endpoint_absence_verdict - so `exit` and
   # `relaunch` cannot reach two different answers about one endpoint.
-  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_IO_TARGET")
+  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
   if [ "$RELAUNCH_STATE" = missing ]; then
     RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET")
     case "${RELAUNCH_ABSENCE%%$'\t'*}" in
@@ -4042,7 +4031,7 @@ herdr_projection_meta_field_exact() { # <meta> <key>
 # dead or agent-free endpoint before token inspection may allow flat fallback.
 # Exact Herdr fields are retained for the narrower version 2 reclaim path.
 herdr_projection_existing_meta_allows_flat() { # <meta>
-  local meta=$1 old_backend old_target old_io_target old_session old_pane old_state target_session target_pane rc
+  local meta=$1 old_backend old_target old_session old_pane old_state target_session target_pane
   HERDR_RECOVERY_BACKEND=""
   HERDR_RECOVERY_WORKSPACE_ID=""
   HERDR_RECOVERY_TAB_ID=""
@@ -4100,15 +4089,7 @@ herdr_projection_existing_meta_allows_flat() { # <meta>
       ;;
     esac
   fi
-  if old_io_target=$(fm_backend_agent_authority_target_of_meta "$meta"); then
-    :
-  else
-    rc=$?
-    [ "$rc" -ne 2 ] || return 0
-    echo "error: existing $old_backend endpoint for $ID is unknown; refusing duplicate launch" >&2
-    return 1
-  fi
-  old_state=$(fm_backend_agent_alive "$old_backend" "$old_io_target")
+  old_state=$(fm_backend_agent_alive "$old_backend" "$old_target")
   case "$old_state" in
   dead) return 0 ;;
   alive | unknown)
@@ -4177,12 +4158,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # relaunch a REPLACEMENT rather than a second copy of the task: no new
     # terminal, no second worktree, and every uncommitted change left exactly
     # where the previous agent left it.
-    T=$RELAUNCH_IO_TARGET
+    T=$RELAUNCH_TARGET
     WT_TARGET=$T
     SES=${RELAUNCH_TARGET%%:*}
     if [ "$BACKEND" = tmux ]; then
       TMUX_WINDOW_TARGET=$RELAUNCH_TARGET
-      TMUX_PANE_ID=$T
     fi
   else
     # The recorded endpoint is authoritatively gone, so there is nothing to
@@ -4269,7 +4249,7 @@ else
     # Keep the named window separately for metadata and whole-window cleanup.
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
     TMUX_WINDOW_TARGET=$T
-    SPAWN_FRESH_ENDPOINT_OPENED=1
+    [ "$HARNESS" != polytoken ] || SPAWN_FRESH_ENDPOINT_OPENED=1
     TMUX_PANE_ID=$(fm_backend_tmux_task_pane "$SES:$WID") || exit 1
     T=$TMUX_PANE_ID
     WT_TARGET=$T
@@ -4521,7 +4501,7 @@ EOF
     ;;
   esac
   # Orca and the Herdr projection own their own abort cleanup above.
-  if [ "$HARNESS" = polytoken ] && [ "$BACKEND" != tmux ] && [ "$BACKEND" != orca ] && [ "${HERDR_PROJECTED:-0}" -ne 1 ]; then
+  if [ "$HARNESS" = polytoken ] && [ "$BACKEND" != orca ] && [ "${HERDR_PROJECTED:-0}" -ne 1 ]; then
     SPAWN_FRESH_ENDPOINT_OPENED=1
   fi
 fi
@@ -5843,7 +5823,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window tmux_pane_id endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent forge backup_remote backup_prefix model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id paseo_terminal_id paseo_workspace_id home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent forge backup_remote backup_prefix model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id paseo_terminal_id paseo_workspace_id home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -5851,7 +5831,11 @@ preserve_relaunch_meta() {
 }
 {
   echo "window=$META_WINDOW"
-  [ "$BACKEND" != tmux ] || echo "tmux_pane_id=$TMUX_PANE_ID"
+  # Relaunch preserves the existing field through preserve_relaunch_meta.
+  # Lifecycle actions retain their window target; only fresh spawn binds I/O.
+  if [ "$BACKEND" = tmux ] && [ "$RELAUNCH" -eq 0 ]; then
+    echo "tmux_pane_id=$TMUX_PANE_ID"
+  fi
   echo "endpoint_task_id=$ID"
   echo "worktree=$WT"
   echo "project=$PROJ_ABS"

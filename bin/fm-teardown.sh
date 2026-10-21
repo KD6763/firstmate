@@ -204,12 +204,7 @@
 #   --legacy-record accepts a task record that predates the spawn_gen field:
 #   teardown then proceeds only when the recorded endpoint is confirmed dead or
 #   agent-less (bin/fm-backend.sh's recovery-grade classifier), and without
-#   --force the worktree still passes the ordinary landed-work checks.
-#   Tmux records without tmux_pane_id retain the existing window-based teardown
-#   behavior; pane identity checks apply only when the record carries that field.
-#   See docs/agent-control.md#upgrading-unbound-tmux-tasks for the retirement and
-#   fresh-spawn upgrade procedure. No pane is adopted or recorded by this path.
-#   A record that also lacks spawn_gen still requires --legacy-record. The
+#   --force the worktree still passes the ordinary landed-work checks. The
 #   accepted legacy incarnation is stamped into the record before its close is
 #   recorded and named in the teardown line; the flag never relaxes the
 #   unlanded-work refusal, which --force alone can authorize. A legacy- stamp
@@ -626,7 +621,7 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
       # or agent-less before any cleanup decision is made.
       TEARDOWN_LEGACY_PENDING=1
     elif [ "$TEARDOWN_LEGACY_GEN_COUNT" = 0 ]; then
-      echo "error: task $ID's record has no spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - finish or retire the task from its own terminal, then pass --legacy-record after its recorded endpoint is confirmed dead or absent" >&2
+      echo "error: task $ID's record has no spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - relaunch the task to publish an unambiguous incarnation, then retry teardown, or pass --legacy-record once its recorded endpoint is confirmed dead or agent-less" >&2
       exit 1
     else
       echo "error: task $ID's record has an unreadable spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - fix the record, then retry teardown" >&2
@@ -645,7 +640,7 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
         if [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
           TEARDOWN_WINDOWLESS=1
         elif [ "$LEGACY_RECORD_GIVEN" != 1 ]; then
-          echo "error: task $ID's record carries the legacy incarnation stamp $FM_BACKLOG_META_SPAWN_GEN left by an abandoned --legacy-record teardown, not an incarnation published by a spawn; refusing automatic teardown - finish or retire the task from its own terminal, then pass --legacy-record after its recorded endpoint is confirmed dead or absent" >&2
+          echo "error: task $ID's record carries the legacy incarnation stamp $FM_BACKLOG_META_SPAWN_GEN left by an abandoned --legacy-record teardown, not an incarnation published by a spawn; refusing automatic teardown - relaunch the task to publish an unambiguous incarnation, then retry teardown, or pass --legacy-record once its recorded endpoint is confirmed dead or agent-less" >&2
           exit 1
         fi
         TEARDOWN_LEGACY_PENDING=1
@@ -1199,37 +1194,12 @@ MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
 BASE_BRANCH=$(grep '^base_branch=' "$META" | cut -d= -f2- || true)
 
-TEARDOWN_TMUX_UNBOUND=0
-if [ "$BACKEND" = tmux ] && ! grep -q '^tmux_pane_id=' "$META"; then
-  TEARDOWN_TMUX_UNBOUND=1
-fi
-teardown_require_tmux_endpoint_authority() {  # <meta> <task-id> <backend> <target>
-  local meta=$1 task_id=$2 backend=$3 target=$4 endpoint_status=0
-  [ "$backend" = tmux ] || return 0
-  # Pre-binding records retain the existing window-based teardown contract.
-  # A present but invalid binding is not a legacy record and must refuse.
-  grep -q '^tmux_pane_id=' "$meta" || return 0
-  fm_backend_agent_authority_target_of_meta "$meta" >/dev/null \
-    || endpoint_status=$?
-  case "$endpoint_status" in
-    0|2) return 0 ;;
-    *)
-      echo "REFUSED: task $task_id's recorded agent pane is not verified in its exact recorded tmux window $target; teardown cannot safely close or remove this task. Nothing was changed." >&2
-      return 1 ;;
-  esac
-}
-if [ "$TEARDOWN_WINDOWLESS" != 1 ] && [ "$KIND" != secondmate ]; then
-  teardown_require_tmux_endpoint_authority \
-    "$META" "$ID" "$BACKEND" "$T" || exit 1
-fi
-
 # A record accepted as a legacy incarnation (no spawn_gen, and either
 # --legacy-record given or the record is windowless) may be torn down only
 # when its recorded endpoint is confidently gone or agent-less. Windowless
 # leftovers name no endpoint and are treated as missing. For a recorded
-# window, legacy unbound records keep the recovery-grade window classifier;
-# bound records require a resolved agent pane classified dead or a
-# resolver-proven missing endpoint. Ambiguous or unreadable state refuses
+# window, only the recovery-grade classifier's dead and missing license
+# that, and every ambiguous, unreadable, or unverified endpoint state refuses
 # while the record is still intact. Acceptance resolves the incarnation token
 # here; the record itself is stamped only once every landed-work refusal has
 # passed, immediately before the close marker binds to it, so any refusal
@@ -1238,23 +1208,12 @@ if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
   if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
     TEARDOWN_LEGACY_ENDPOINT=missing
   else
-    if [ "$TEARDOWN_TMUX_UNBOUND" = 1 ]; then
-      TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$T")
-    else
-      TEARDOWN_LEGACY_IO_STATUS=0
-      TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$META") \
-        || TEARDOWN_LEGACY_IO_STATUS=$?
-      case "$TEARDOWN_LEGACY_IO_STATUS" in
-        0) TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$TEARDOWN_LEGACY_IO_TARGET") ;;
-        2) TEARDOWN_LEGACY_ENDPOINT=missing ;;
-        *) TEARDOWN_LEGACY_ENDPOINT=unreadable ;;
-      esac
-    fi
+    TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$T")
     case "$TEARDOWN_LEGACY_ENDPOINT" in
       dead|missing) ;;
       *)
         echo "REFUSED: task $ID's record predates spawn_gen and its recorded endpoint reads '$TEARDOWN_LEGACY_ENDPOINT', not confidently dead or agent-less; --legacy-record teardown is refused while an agent may still be bound to it. Nothing was changed." >&2
-        echo "Finish or exit the task from its own terminal and preserve its work, then retry --legacy-record (docs/agent-control.md#upgrading-unbound-tmux-tasks)." >&2
+        echo "Reconcile the endpoint first (bin/fm-crew-state.sh $ID), or relaunch the task to publish an unambiguous incarnation, then retry teardown." >&2
         exit 1
         ;;
     esac
@@ -2282,47 +2241,23 @@ $dir_pids"
 
 reap_task_backend_process_group() {  # <label>
   local label=$1 leader leader_start pgid current_pgid own_pgid
-  local reap_target=$T target_status=0
   if [ "$BACKEND" != tmux ]; then
     echo "warning: lsof is unavailable; cannot resolve a process-group fallback for $BACKEND task $ID" >&2
     return 0
   fi
-  if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
-    reap_target=$(fm_backend_agent_authority_target_of_meta "$META") || target_status=$?
-    case "$target_status" in
-      0) ;;
-      2) return 0 ;;
-      *)
-        echo "REFUSED: task $ID's recorded agent pane is not verified before process-group cleanup; preserving the worktree and task state." >&2
-        return 1
-        ;;
-    esac
-  fi
-  leader=$(tmux display-message -p -t "$reap_target" '#{pane_pid}' 2>/dev/null) || leader=""
+  leader=$(tmux display-message -p -t "$T" '#{pane_pid}' 2>/dev/null) || leader=""
   case "$leader" in ''|*[!0-9]*)
-    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
-      echo "REFUSED: task $ID's recorded agent pane process could not be verified before process-group cleanup; preserving the worktree and task state." >&2
-      return 1
-    fi
     echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
     return 0
     ;;
   esac
   leader_start=$(task_process_identity "$leader") || {
-    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
-      echo "REFUSED: task $ID's recorded agent pane process identity could not be verified before process-group cleanup; preserving the worktree and task state." >&2
-      return 1
-    fi
     echo "warning: lsof is unavailable; cannot identify the tmux pane process group for $ID" >&2
     return 0
   }
   pgid=$(ps -o pgid= -p "$leader" 2>/dev/null) || pgid=""
   pgid=$(printf '%s' "$pgid" | tr -d '[:space:]')
   case "$pgid" in ''|*[!0-9]*|0|1)
-    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
-      echo "REFUSED: task $ID's recorded agent pane process group could not be verified before cleanup; preserving the worktree and task state." >&2
-      return 1
-    fi
     echo "warning: lsof is unavailable; cannot resolve the tmux pane process group for $ID" >&2
     return 0
     ;;
@@ -2330,41 +2265,13 @@ reap_task_backend_process_group() {  # <label>
   own_pgid=$(ps -o pgid= -p "$$" 2>/dev/null) || own_pgid=""
   own_pgid=$(printf '%s' "$own_pgid" | tr -d '[:space:]')
   if [ "$pgid" = "$own_pgid" ]; then
-    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
-      echo "REFUSED: task $ID's recorded agent pane resolves to teardown's own process group; preserving the worktree and task state." >&2
-      return 1
-    fi
     echo "warning: lsof is unavailable; refusing to signal teardown's own process group for $ID" >&2
     return 0
   fi
-  if ! task_process_identity_matches "$leader" "$leader_start"; then
-    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
-      echo "REFUSED: task $ID's recorded agent pane process identity changed before process-group cleanup; preserving the worktree and task state." >&2
-      return 1
-    fi
-    return 0
-  fi
+  task_process_identity_matches "$leader" "$leader_start" || return 0
   current_pgid=$(ps -o pgid= -p "$leader" 2>/dev/null) || current_pgid=""
   current_pgid=$(printf '%s' "$current_pgid" | tr -d '[:space:]')
-  if [ "$current_pgid" != "$pgid" ]; then
-    if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
-      echo "REFUSED: task $ID's recorded agent pane process group changed before cleanup; preserving the worktree and task state." >&2
-      return 1
-    fi
-    return 0
-  fi
-  if [ "$TEARDOWN_TMUX_UNBOUND" != 1 ]; then
-    target_status=0
-    fm_backend_agent_authority_target_of_meta "$META" >/dev/null || target_status=$?
-    case "$target_status" in
-      0) ;;
-      2) return 0 ;;
-      *)
-        echo "REFUSED: task $ID's recorded agent pane is not verified before process-group cleanup; preserving the worktree and task state." >&2
-        return 1
-        ;;
-    esac
-  fi
+  [ "$current_pgid" = "$pgid" ] || return 0
   echo "teardown: reaping leaked $label process group for $ID: $pgid" >&2
   kill -TERM -- "-$pgid" 2>/dev/null || true
   sleep 1
@@ -2387,7 +2294,7 @@ reap_task_worktree_processes() {  # <label> <dir>...
   local -a tracked_pids tracked_identities remaining_pids remaining_identities
   shift
   if ! command -v lsof >/dev/null 2>&1; then
-    reap_task_backend_process_group "$label" || return 1
+    reap_task_backend_process_group "$label"
     return 0
   fi
   while [ "$pass" -le "$max_passes" ]; do
@@ -3333,29 +3240,6 @@ preflight_firstmate_home_herdr_children() {  # <home>
   done
 }
 
-preflight_firstmate_home_tmux_endpoint_authority() {  # <home>
-  local home=$1 sub_state child_meta child_id child_backend child_target child_kind child_home child_wt
-  sub_state="$home/state"
-  [ -d "$sub_state" ] || return 0
-  for child_meta in "$sub_state"/*.meta; do
-    [ -e "$child_meta" ] || continue
-    child_id=$(basename "$child_meta" .meta)
-    fm_backend_validate_task_endpoint "$child_meta" "$child_id" || return 1
-    child_backend=$FM_BACKEND_VALIDATED_BACKEND
-    child_target=$FM_BACKEND_VALIDATED_TARGET
-    teardown_require_tmux_endpoint_authority \
-      "$child_meta" "$child_id" "$child_backend" "$child_target" || return 1
-    child_kind=$(meta_value "$child_meta" kind)
-    [ -n "$child_kind" ] || child_kind=ship
-    if [ "$child_kind" = secondmate ]; then
-      child_wt=$(meta_value "$child_meta" worktree)
-      child_home=$(meta_value "$child_meta" home)
-      [ -n "$child_home" ] || child_home=$child_wt
-      preflight_firstmate_home_tmux_endpoint_authority "$child_home" || return 1
-    fi
-  done
-}
-
 # endpoint_close_refusal: the one report for an endpoint close that could not
 # do its job, wherever a close is attempted, and the one decision about what
 # that costs. Reporting such a close as a completed cleanup does not merely
@@ -3558,7 +3442,6 @@ if [ "$KIND" = secondmate ]; then
     validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
     preflight_descendant_task_locks "$HOME_PATH" || exit 1
     validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
-    preflight_firstmate_home_tmux_endpoint_authority "$HOME_PATH" || exit 1
     preflight_descendant_treehouse_slots || exit 1
     if [ "$BACKEND" = herdr ]; then
       teardown_herdr_preflight_target "$T" "$ID" || exit 1
@@ -3581,8 +3464,6 @@ if [ "$KIND" = secondmate ] && [ "$FORCE" != "--force" ]; then
 fi
 
 if [ "$KIND" = secondmate ]; then
-  teardown_require_tmux_endpoint_authority \
-    "$META" "$ID" "$BACKEND" "$T" || exit 1
   preflight_firstmate_home_process_event_tree "$HOME_PATH" "secondmate home" || exit 1
 fi
 
@@ -3693,14 +3574,6 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
     echo "error: the pending backlog $BACKLOG_TRANSITION for $ID is not replayable; refusing destructive teardown" >&2
     exit 1
   }
-else
-  if [ "$CLEANUP_RECOVERY" = orca ]; then
-    BACKLOG_SKIP_REASON="Orca cleanup recovery is not a launched backlog worker"
-  else
-    BACKLOG_SKIP_REASON=$TEARDOWN_BACKLOG_SKIP_REASON
-  fi
-fi
-
 # Roll the accepted legacy incarnation's stamp back to the record's exact
 # pre-stamp bytes. Uses perl - already in the teardown lifecycle's curated PATH
 # (truncate is not, and is absent on stock macOS) - and verifies the restored
@@ -3713,26 +3586,6 @@ teardown_legacy_stamp_rollback() {
   [ "$(wc -c < "$META" | tr -d ' ')" = "$TEARDOWN_LEGACY_PRESTAMP_SIZE" ]
 }
 
-# Every landed/discard-work refusal above has now passed (or --force skipped
-# them). Fix 1 and Fix 2 (see script header) run here, unconditionally on
-# --force, and before ANY destructive step below - a still-parked run or a
-# leaked process can own live work in this exact worktree. Not for
-# kind=secondmate: a secondmate home's own runtime lifecycle is owned by the
-# dedicated process-event and firstmate-home removal machinery further below,
-# not by task-worktree cleanup.
-if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ] \
-   && [ "$ORCA_PATH_MATCH_VERIFIED" != 1 ]; then
-  require_orca_worktree_path_match_if_present "$ORCA_WORKTREE_ID" "$WT" || exit 1
-  ORCA_PATH_MATCH_VERIFIED=1
-fi
-if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
-  conclude_task_no_mistakes_run "$WT"
-  reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
-elif [ "$KIND" != secondmate ]; then
-  reap_task_worktree_processes tasktmp "$TASK_TMP"
-fi
-
-if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
   # The accepted legacy incarnation is stamped under the meta lock already
   # held, right before the close marker binds to it: every refusal above leaves
   # the record byte-identical, and every later replay reads the same stamped
@@ -3781,8 +3634,27 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
     fi
     exit 1
   fi
+else
+  if [ "$CLEANUP_RECOVERY" = orca ]; then
+    BACKLOG_SKIP_REASON="Orca cleanup recovery is not a launched backlog worker"
+  else
+    BACKLOG_SKIP_REASON=$TEARDOWN_BACKLOG_SKIP_REASON
+  fi
 fi
 
+# Every landed/discard-work refusal above has now passed (or --force skipped
+# them). Fix 1 and Fix 2 (see script header) run here, unconditionally on
+# --force, and before ANY destructive step below - a still-parked run or a
+# leaked process can own live work in this exact worktree. Not for
+# kind=secondmate: a secondmate home's own runtime lifecycle is owned by the
+# dedicated process-event and firstmate-home removal machinery further below,
+# not by task-worktree cleanup.
+if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
+  conclude_task_no_mistakes_run "$WT"
+  reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
+elif [ "$KIND" != secondmate ]; then
+  reap_task_worktree_processes tasktmp "$TASK_TMP"
+fi
 if [ "$KIND" = ship ] && teardown_owns_worktree && [ -e "$CONFIG/pipeline-spend" ]; then
   FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" FM_CONFIG_OVERRIDE="$CONFIG" \
     "$SCRIPT_DIR/fm-pipeline-spend.sh" record "$ID" >/dev/null \
@@ -3795,6 +3667,10 @@ fi
 
 # Best-effort: drop the local task branch so the shared repo does not accumulate refs.
 if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
+  if [ "$ORCA_PATH_MATCH_VERIFIED" != 1 ]; then
+    require_orca_worktree_path_match_if_present "$ORCA_WORKTREE_ID" "$WT" || exit 1
+    ORCA_PATH_MATCH_VERIFIED=1
+  fi
   if [ -d "$WT" ]; then
     branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
     if [ "$branch" != "HEAD" ]; then

@@ -216,8 +216,8 @@ test_spawn_isolation_abort() {
 #     collides under base-index 1;
 #   - the window id is captured (-P -F #{window_id}) and automatic-rename/allow-rename
 #     are disabled so the fm-<id> name survives treehouse cd'ing into the worktree;
-#   - the treehouse-get send-keys and the worktree wait loop target the bound
-#     agent pane, never the (possibly-renamed) window - a lost name would let
+#   - the treehouse-get send-keys and the worktree wait loop target that stable
+#     window id, never the (possibly-renamed) name - a lost name would let
 #     display-message fall back to the active client's window and misread firstmate's
 #     OWN pane as the worktree, tangling a hook into the primary checkout.
 make_spawn_record_fakebin() {
@@ -232,10 +232,7 @@ case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
-  list-panes) printf '%%1\n'; exit 0 ;;
-  display-message)
-    case "$*" in *'#{pane_id}'*) printf '%%1\n'; exit 0 ;; esac
-    printf 'firstmate\n'; exit 0 ;;
+  display-message) printf 'firstmate\n'; exit 0 ;;
   new-window)
     name=
     previous=
@@ -244,12 +241,11 @@ case "${1:-}" in
       previous=$arg
     done
     printf '%s\n' "$name" > "$window_file"
-    printf '%s\n' "@1"
+    printf '%s\n' "@spawnwid"
     exit 0 ;;
   list-windows)
     case "$*" in
-      *'#{window_id}|#{window_index}|#{window_name}'*) printf '@1|0|%s\n' "$(cat "$window_file")" ;;
-      *'#{window_id}'*) printf '%s\n' '@1' ;;
+      *'#{window_id}'*) printf '%s\n' '@spawnwid' ;;
       *) [ ! -s "$window_file" ] || cat "$window_file" ;;
     esac
     exit 0 ;;
@@ -292,18 +288,18 @@ test_spawn_tmux_window_construction() {
     "new-window must not target the bare session name (collides under base-index 1)"
 
   # Bug 2 fix (a): pin the window name against automatic-rename / allow-rename.
-  assert_grep "set-window-option -t @1 automatic-rename off" "$rec" \
+  assert_grep "set-window-option -t @spawnwid automatic-rename off" "$rec" \
     "must disable automatic-rename on the spawned window"
-  assert_grep "set-window-option -t @1 allow-rename off" "$rec" \
+  assert_grep "set-window-option -t @spawnwid allow-rename off" "$rec" \
     "must disable allow-rename on the spawned window"
 
-  # Bug 2 fix (b): treehouse-get and the worktree wait loop target the recorded pane.
-  assert_grep "send-keys -t %1 treehouse get Enter" "$rec" \
-    "treehouse get must be sent to the recorded agent pane"
-  assert_grep "display-message -p -t %1 #{pane_current_path}" "$rec" \
-    "the worktree wait loop must query the recorded agent pane, not the name"
+  # Bug 2 fix (b): treehouse-get and the worktree wait loop target the stable id.
+  assert_grep "send-keys -t @spawnwid treehouse get Enter" "$rec" \
+    "treehouse get must be sent to the stable window id"
+  assert_grep "display-message -p -t @spawnwid #{pane_current_path}" "$rec" \
+    "the worktree wait loop must query the stable window id, not the name"
 
-  pass "fm-spawn: appends windows by session-colon, pins the name, and targets the bound pane"
+  pass "fm-spawn: appends windows by session-colon, pins the name, and targets the window id"
 }
 
 test_lib_classification

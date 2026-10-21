@@ -25,8 +25,6 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# shellcheck source=tests/tmux-fixtures.sh
-. "$(dirname "${BASH_SOURCE[0]}")/tmux-fixtures.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$ROOT/bin/fm-timeout-lib.sh"
 
@@ -128,7 +126,6 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
-  fm_test_tmux_protocol "$fakebin/tmux"
   fm_fake_exit0 "$fakebin" treehouse gh gh-axi no-mistakes
 
   fm_git_init_commit "$case_dir/project"
@@ -482,7 +479,6 @@ esac
 exit 0
 SH
   chmod +x "$case_dir/fakebin/tmux"
-  fm_test_tmux_protocol "$case_dir/fakebin/tmux"
 }
 
 track_teardown_resource_actions() {  # <case-dir>
@@ -498,7 +494,6 @@ SH
 exit 0
 SH
   chmod +x "$case_dir/fakebin/tmux" "$case_dir/fakebin/treehouse"
-  fm_test_tmux_protocol "$case_dir/fakebin/tmux"
 }
 
 interrupt_teardown_during_treehouse_return() {  # <case-dir>
@@ -545,7 +540,6 @@ esac
 exit 0
 SH
   chmod +x "$case_dir/fakebin/tmux"
-  fm_test_tmux_protocol "$case_dir/fakebin/tmux"
 }
 
 break_meta_removal() {  # <case-dir> <meta-path>
@@ -613,7 +607,7 @@ SH
 write_task_meta() {  # <case-dir> <id> <kind> <mode> [extra-line...]
   local case_dir=$1 id=$2 kind=$3 mode=$4
   shift 4
-  fm_write_tmux_meta "$(home_of "$case_dir")/state/$id.meta" \
+  fm_write_meta "$(home_of "$case_dir")/state/$id.meta" \
     "window=firstmate:fm-$id" \
     "endpoint_task_id=$id" \
     "worktree=$case_dir/absent-worktree" \
@@ -952,7 +946,6 @@ case "\${1:-}" in display-message) printf 'firstmate\n'; exit 0 ;; esac
 exit 0
 SH
   chmod +x "$case_dir/fakebin/tmux"
-  fm_test_tmux_protocol "$case_dir/fakebin/tmux"
 
   out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
   [ "$rc" -ne 0 ] || fail "spawn accepted work with an authoritative close still pending"
@@ -988,7 +981,6 @@ case "\${1:-}" in display-message) printf 'firstmate\n'; exit 0 ;; esac
 exit 0
 SH
   chmod +x "$case_dir/fakebin/tmux"
-  fm_test_tmux_protocol "$case_dir/fakebin/tmux"
 
   out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
   [ "$rc" -ne 0 ] || fail "spawn accepted a held backlog row"
@@ -1024,7 +1016,6 @@ case "\${1:-}" in display-message) printf 'firstmate\n'; exit 0 ;; esac
 exit 0
 SH
   chmod +x "$case_dir/fakebin/tmux"
-  fm_test_tmux_protocol "$case_dir/fakebin/tmux"
 
   out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
   [ "$rc" -ne 0 ] || fail "spawn accepted a dependency-blocked backlog row"
@@ -1060,7 +1051,6 @@ case "\${1:-}" in display-message) printf 'firstmate\n'; exit 0 ;; esac
 exit 0
 SH
   chmod +x "$case_dir/fakebin/tmux"
-  fm_test_tmux_protocol "$case_dir/fakebin/tmux"
 
   out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
   [ "$rc" -ne 0 ] || fail "spawn accepted a held In-flight backlog row"
@@ -2584,7 +2574,7 @@ test_lifecycle_refuses_ancestor_symlinks_outside_home_roots() {
   foreign="$worker_case/foreign-home"
   mkdir -p "$foreign/state"
   add_item "$worker_case" "$id"
-  fm_write_tmux_meta "$foreign/state/$id.meta" "kind=ship" "spawn_gen=foreign-worker"
+  fm_write_meta "$foreign/state/$id.meta" "kind=ship" "spawn_gen=foreign-worker"
   ln -s "$foreign" "$home/foreign-link"
   rc=0
   out=$(FM_STATE_OVERRIDE="$home/foreign-link/state" run_bootstrap "$worker_case") || rc=$?
@@ -2730,7 +2720,7 @@ test_no_backlog_teardown_refuses_a_symlinked_task_record_at_entry() {
   target_dir="$home/state-foreign"
   target="$target_dir/$id.meta"
   mkdir -p "$target_dir"
-  fm_write_tmux_meta "$target" \
+  fm_write_meta "$target" \
     "window=firstmate:fm-$id" "endpoint_task_id=$id" \
     "worktree=$foreign_worktree" "project=$case_dir/foreign-project" \
     "harness=claude" "kind=ship" "mode=local-only" "yolo=off"
@@ -2760,7 +2750,7 @@ test_teardown_rechecks_record_parent_after_lock_acquisition() {
   foreign_state="$case_dir/foreign-state"
   foreign_worktree="$case_dir/foreign-worktree"
   mkdir -p "$foreign_state" "$foreign_worktree"
-  fm_write_tmux_meta "$foreign_state/$id.meta" \
+  fm_write_meta "$foreign_state/$id.meta" \
     "window=firstmate:fm-$id" "endpoint_task_id=$id" \
     "worktree=$foreign_worktree" "project=$case_dir/foreign-project" \
     "harness=claude" "kind=ship" "mode=local-only" "yolo=off"
@@ -2801,7 +2791,7 @@ test_teardown_refuses_a_symlinked_state_directory_at_entry() {
   home=$(home_of "$case_dir")
   external_state="$case_dir/external-state"
   mv "$home/state" "$external_state"
-  fm_write_tmux_meta "$external_state/$id.meta" \
+  fm_write_meta "$external_state/$id.meta" \
     "window=firstmate:fm-$id" "endpoint_task_id=$id" \
     "worktree=$case_dir/foreign-worktree" "project=$case_dir/foreign-project" \
     "harness=claude" "kind=ship" "mode=local-only" "yolo=off"

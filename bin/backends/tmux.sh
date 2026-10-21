@@ -196,8 +196,9 @@ EOF
 
 # Bind task I/O to a pane inside its exact recorded window. This deliberately
 # uses the existing window-id resolver, not another general tmux target parser.
-# Resolve a legacy single-pane window once, then pass the returned %id through
-# every read, literal send and Enter retry so focus changes cannot redirect I/O.
+# Fresh spawn resolves its initial pane once; bound task I/O passes its recorded
+# %id through every read, literal send and Enter retry independently of focus.
+# Unbound legacy task I/O bypasses this resolver and retains its window target.
 # Return 2 only for a proven missing endpoint; ambiguous, moved and unreadable
 # bindings return 1. Neither failure permits reading or sending to another pane.
 fm_backend_tmux_task_pane() {  # <session:window> [recorded-pane-id]

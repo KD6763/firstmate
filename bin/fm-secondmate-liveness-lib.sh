@@ -213,16 +213,11 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
     return 0
   fi
 
-  local backend target target_rc=0 lifecycle_target
+  local backend target
   backend=$(fm_backend_of_meta "$meta")
-  target=$(fm_backend_agent_authority_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
-  if [ "$target_rc" -eq 0 ]; then
-    agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
-  elif [ "$target_rc" -eq 2 ]; then
-    agent_state=missing
-  else
-    agent_state=unreadable
-  fi
+  target=$(fm_backend_target_of_meta "$meta")
+  [ -n "$target" ] || target="$window"
+  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
   case "$harness" in
     claude|codex|opencode|pi|pi-signed|grok|kimi|omp) ;;
     *)
@@ -241,12 +236,6 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
         FM_SM_LIVE_KILL=1
         FM_SM_LIVE_CAUSE="confirmed agent absence on existing endpoint"
       else
-        if [ "$backend" = tmux ]; then
-          lifecycle_target=$(fm_backend_target_of_meta "$meta")
-          if [ -n "$lifecycle_target" ] && fm_backend_target_exists "$backend" "$lifecycle_target"; then
-            FM_SM_LIVE_KILL=1
-          fi
-        fi
         FM_SM_LIVE_CAUSE="recorded endpoint confidently missing"
       fi
       FM_SM_LIVE_WHERE="backend=$backend"
@@ -255,11 +244,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
       FM_SM_LIVE_REASON="existing endpoint has ambiguous agent process (backend=$backend)"
       ;;
     unreadable)
-      if [ "$backend" = tmux ] && ! grep -Eq '^tmux_pane_id=.+$' "$meta" 2>/dev/null; then
-        FM_SM_LIVE_REASON="task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)"
-      else
-        FM_SM_LIVE_REASON="endpoint probe unreadable (backend=$backend)"
-      fi
+      FM_SM_LIVE_REASON="endpoint probe unreadable (backend=$backend)"
       ;;
     unverified-harness)
       FM_SM_LIVE_REASON="recorded harness '$harness' is unverified for recovery (backend=$backend)"

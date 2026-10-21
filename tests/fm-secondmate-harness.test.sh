@@ -1019,7 +1019,7 @@ test_spawned_secondmate_uses_its_harness_supervision_model() {
     printf '%s\n' "$harness" > "$w/home/config/secondmate-harness"
     make_seeded_home "$sm" sm
     spawn_secondmate_capture "$w" sm "$sm" "$launchlog" >/dev/null 2>&1
-    fm_write_tmux_meta "$sm/state/task.meta" "window=firstmate:fm-task" "kind=ship"
+    fm_write_meta "$sm/state/task.meta" "window=firstmate:fm-task" "kind=ship"
     touch "$sm/state/.last-watcher-beat"
     fakebin="$w/tmux-sm/fakebin"
     # Point the guard at the fixture home, not at whatever checkout this suite

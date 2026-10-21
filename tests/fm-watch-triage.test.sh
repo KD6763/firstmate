@@ -3927,7 +3927,7 @@ test_unavailable_pane_binding_preserves_endpoint_reporting() {
   local dir state fakebin out capture window key spec prior_hash
   local failed='state: failed · source: run-step · run failed'
   window='test:fm-wedge'; key=$(printf '%s' "$window" | tr ':/.' '___')
-  for spec in window-missing pane-missing ambiguous stale-binding; do
+  for spec in window-missing pane-missing malformed stale-binding; do
     dir=$(wedge_threshold_fixture "pane-binding-$spec" 'working: still compiling' 0 10)
     sed -i.bak '/^tmux_pane_id=/d' "$dir/state/wedge.meta"
     rm -f "$dir/state/wedge.meta.bak"
@@ -3942,7 +3942,8 @@ test_unavailable_pane_binding_preserves_endpoint_reporting() {
         printf 'tmux_pane_id=%%1\n' >> "$state/wedge.meta" ;;
       pane-missing)
         printf 'tmux_pane_id=%%1\n' >> "$state/wedge.meta" ;;
-      ambiguous)
+      malformed)
+        printf 'tmux_pane_id=invalid\n' >> "$state/wedge.meta"
         FM_FAKE_TMUX_PANES=$'%1\n%2'
         FM_FAKE_TMUX_ALL_PANES=$'%1\n%2' ;;
       stale-binding)
@@ -3978,14 +3979,14 @@ test_unavailable_pane_binding_preserves_endpoint_reporting() {
     fi
     unset FM_TEST_TMUX_WINDOWS FM_FAKE_TMUX_PANES FM_FAKE_TMUX_ALL_PANES FM_FAKE_TMUX_LOG
   done
-  pass "missing windows and panes report once; ambiguous and stale bindings escalate without inspecting another pane"
+  pass "missing windows and panes report once; malformed and stale bindings escalate without inspecting another pane"
 }
 
 test_afk_unavailable_pane_binding_hands_off_once_and_rearms() {
   local dir state fakebin out capture window key spec prior_hash
   local failed='state: failed · source: run-step · run failed'
   window='test:fm-wedge'; key=$(printf '%s' "$window" | tr ':/.' '___')
-  for spec in missing ambiguous; do
+  for spec in missing malformed; do
     dir=$(wedge_threshold_fixture "away-binding-$spec" 'working: still compiling' 0 10)
     sed -i.bak '/^tmux_pane_id=/d' "$dir/state/wedge.meta"
     rm -f "$dir/state/wedge.meta.bak"
@@ -3998,6 +3999,7 @@ test_afk_unavailable_pane_binding_hands_off_once_and_rearms() {
     if [ "$spec" = missing ]; then
       printf 'tmux_pane_id=%%1\n' >> "$state/wedge.meta"
     else
+      printf 'tmux_pane_id=invalid\n' >> "$state/wedge.meta"
       FM_FAKE_TMUX_PANES=$'%1\n%2'
       FM_FAKE_TMUX_ALL_PANES=$'%1\n%2'
     fi
@@ -4022,8 +4024,9 @@ test_afk_unavailable_pane_binding_hands_off_once_and_rearms() {
     fi
     ack_stopped_cycle "$state" || fail "could not acknowledge the silent away-mode round"
 
-    # Repair the same task, then break the same binding again. A successful
-    # capture must re-arm the handoff without requiring metadata to change.
+    # Repair the task, then make its bound pane unavailable again.
+    sed -i.bak 's/^tmux_pane_id=.*/tmux_pane_id=%1/' "$state/wedge.meta"
+    rm -f "$state/wedge.meta.bak"
     FM_FAKE_TMUX_PANES='%1'
     FM_FAKE_TMUX_ALL_PANES='%1'
     : > "$out"
@@ -4036,6 +4039,8 @@ test_afk_unavailable_pane_binding_hands_off_once_and_rearms() {
       FM_FAKE_TMUX_PANES='%2'
       FM_FAKE_TMUX_ALL_PANES='%2'
     else
+      sed -i.bak 's/^tmux_pane_id=.*/tmux_pane_id=invalid/' "$state/wedge.meta"
+      rm -f "$state/wedge.meta.bak"
       FM_FAKE_TMUX_PANES=$'%1\n%2'
       FM_FAKE_TMUX_ALL_PANES=$'%1\n%2'
     fi
@@ -4046,7 +4051,7 @@ test_afk_unavailable_pane_binding_hands_off_once_and_rearms() {
       || fail "the re-armed away-mode handoff lost its failed-binding reason"
     unset FM_TEST_TMUX_WINDOWS FM_FAKE_TMUX_PANES FM_FAKE_TMUX_ALL_PANES FM_FAKE_TMUX_LOG
   done
-  pass "away-mode missing and ambiguous bindings hand off once, avoid other panes, and re-arm after recovery"
+  pass "away-mode missing and malformed bindings hand off once, avoid other panes, and re-arm after recovery"
 }
 
 # The load-bearing direction. A genuinely wedged LIVE agent must escalate exactly

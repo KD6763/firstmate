@@ -90,6 +90,7 @@ make_tmux_stub() {  # <dir> -> echoes fakebin dir
 #!/usr/bin/env bash
 set -u
 D=$FM_FAKE_DIR
+printf '%s\n' "$*" >> "$D/calls"
 # The rows devin 3000.11.1 renders for each modelled screen (live capture).
 devin_screen() {  # <running|armed|cancelled|idle|picker>
   # The idle placeholder is dark truecolor text, as Devin draws it.
@@ -162,7 +163,6 @@ case "${1:-}" in
   display-message)
     for a in "$@"; do
       case "$a" in
-        *pane_id*) printf '%%9\n'; exit 0 ;;
         *cursor_y*)
           # A modelled Devin screen parks the cursor on its composer row.
           if [ -f "$D/devin" ]; then
@@ -191,14 +191,8 @@ case "${1:-}" in
     fi
     if [ -f "$D/devin" ]; then devin_screen "$(cat "$D/devin")"; elif [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
     exit 0 ;;
-  list-panes) printf '%%9\n'; exit 0 ;;
   list-windows)
-    if [ -f "$D/windows" ]; then
-      case "$*" in
-        *'#{window_id}|#{window_index}|#{window_name}'*) sed 's/^/@9|0|/' "$D/windows" ;;
-        *) cat "$D/windows" ;;
-      esac
-    fi
+    if [ -f "$D/windows" ]; then cat "$D/windows"; fi
     exit 0 ;;
 esac
 exit 0
@@ -243,7 +237,6 @@ add_task() {
   printf '# brief for %s\n' "$id" > "$home/data/$id/brief.md"
   {
     echo "window=$window"
-    [ "$backend" != tmux ] || echo "tmux_pane_id=%9"
     echo "endpoint_task_id=$id"
     echo "worktree=$wt"
     echo "project=$proj"
@@ -288,6 +281,31 @@ keys_sent() {  # <case-dir>
 }
 
 # --- 1. adapter contract across every verified harness -----------------------
+
+test_pane_metadata_does_not_change_lifecycle_control() {
+  local dir out rc binding verb
+  for binding in absent %1 %999999 invalid empty duplicate; do
+    for verb in interrupt exit; do
+      dir=$(new_case "pane-parity-$binding-$verb")
+      add_task "$dir" t1 claude
+      alive_as "$dir" claude
+      case "$binding" in
+        absent) ;;
+        empty) printf 'tmux_pane_id=\n' >> "$dir/home/state/t1.meta" ;;
+        duplicate) printf 'tmux_pane_id=%%1\ntmux_pane_id=%%2\n' >> "$dir/home/state/t1.meta" ;;
+        *) printf 'tmux_pane_id=%s\n' "$binding" >> "$dir/home/state/t1.meta" ;;
+      esac
+      out=$(run_control "$dir" t1 "$verb"); rc=$?
+      expect_code 0 "$rc" "$verb changed with $binding pane metadata"$'\n'"$out"
+      grep -q '^send-keys -t .*:fm-t1 ' "$dir/fake/calls" \
+        || fail "$verb lost its existing window target with $binding metadata"
+      if grep -E '^send-keys -t %|^list-panes ' "$dir/fake/calls"; then
+        fail "$verb introduced pane-bound lifecycle behavior"
+      fi
+    done
+  done
+  pass "fm-control: pane metadata does not change window-based interrupt or exit"
+}
 
 test_exit_types_each_harness_verified_command() {
   local dir out rc harness expected key repeat clear
@@ -840,28 +858,6 @@ test_already_stopped_exit_is_idempotent() {
   pass "fm-control exit: an already-stopped agent is idempotent success with no bytes sent"
 }
 
-test_unbound_legacy_endpoint_grants_no_control_authority() {
-  local dir out rc
-  dir=$(new_case legacy-unbound)
-  add_task "$dir" t1 claude
-  sed '/^tmux_pane_id=/d' "$dir/home/state/t1.meta" > "$dir/home/state/t1.meta.next"
-  mv "$dir/home/state/t1.meta.next" "$dir/home/state/t1.meta"
-  alive_as "$dir" claude
-
-  out=$(run_control "$dir" t1 interrupt); rc=$?
-  expect_code 1 "$rc" "an unbound legacy endpoint must not authorize interrupt"
-  assert_contains "$out" "task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" \
-    "interrupt did not explain how to establish control authority"
-
-  out=$(run_control "$dir" t1 exit); rc=$?
-  expect_code 1 "$rc" "an unbound legacy endpoint must not authorize exit"
-  assert_contains "$out" "task has no recorded agent pane; finish or retire it from its own terminal, then tear down and spawn a new task (see docs/agent-control.md#upgrading-unbound-tmux-tasks)" \
-    "exit did not explain how to establish control authority"
-  [ ! -s "$dir/fake/keys" ] || fail "an unbound control refusal still sent a key"
-  [ ! -s "$dir/fake/literal" ] || fail "an unbound control refusal still typed text"
-  pass "fm-control: unbound legacy endpoints grant no lifecycle authority"
-}
-
 test_missing_tmux_endpoint_refuses_rather_than_claiming_a_stop() {
   local dir out rc
   dir=$(new_case gone)
@@ -1272,7 +1268,6 @@ test_verb_allowlist_is_closed
 test_resume_is_refused_with_its_reason
 test_relaunch_only_flags_are_rejected_on_other_verbs
 test_already_stopped_exit_is_idempotent
-test_unbound_legacy_endpoint_grants_no_control_authority
 test_missing_tmux_endpoint_refuses_rather_than_claiming_a_stop
 test_interrupt_refuses_when_no_agent_runs
 test_ambiguous_endpoint_refuses
@@ -1291,3 +1286,5 @@ test_grok_interrupt_without_acknowledgement_reports_unconfirmed
 test_grok_idle_footer_does_not_confirm_cancellation
 test_secondmate_control_command_carries_no_marker
 test_fm_send_still_marks_the_same_secondmate_task
+
+test_pane_metadata_does_not_change_lifecycle_control

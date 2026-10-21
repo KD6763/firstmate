@@ -65,19 +65,6 @@ unset CLAUDECODE PI_CODING_AGENT FM_PI_HARNESS GROK_AGENT CURSOR_AGENT CURSOR_IN
 HARNESS="$ROOT/bin/fm-harness.sh"
 SPAWN="$ROOT/bin/fm-spawn.sh"
 TMP_ROOT=$(fm_test_tmproot fm-polytoken-harness)
-REAL_TMUX=$(command -v tmux 2>/dev/null || true)
-REAL_TMUX_SOCKET="fm-polytoken-spawn-$$"
-
-cleanup_polytoken_harness_test() {
-  [ -z "$REAL_TMUX" ] || "$REAL_TMUX" -L "$REAL_TMUX_SOCKET" kill-server >/dev/null 2>&1 || true
-  fm_test_cleanup
-}
-
-trap cleanup_polytoken_harness_test EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-trap 'exit 129' HUP
-trap 'exit 131' QUIT
 
 CAPS_TMUX=$'styled=1\ncursor=1\nidentity=1\nrows=0'
 RULE=$(printf '%.0s─' $(seq 1 24))
@@ -835,11 +822,7 @@ case "${1:-}" in
     fi
     exit 0
     ;;
-  list-panes)
-    [ "${PTFAKE_FAIL_LIST_PANES:-0}" != 1 ] || exit 1
-    printf '%%1\n'
-    exit 0
-    ;;
+  list-panes) printf '%%1\n'; exit 0 ;;
   new-window)
     name=
     previous=
@@ -924,104 +907,6 @@ run_polytoken_spawn() {
     FM_POLYTOKEN_POLL_INTERVAL="${FM_POLYTOKEN_POLL_INTERVAL:-0.1}" \
     PATH="$fakebin:$BASE_PATH" \
     "$SPAWN" "$id" "$proj" --harness polytoken --model zai/glm-5.3-flash --effort low --mode no-mistakes --yolo off "$@" 2>&1
-}
-
-install_real_tmux_spawn_shims() {
-  local fakebin=$1
-  cat > "$fakebin/tmux" <<'SH'
-#!/usr/bin/env bash
-set -u
-printf '%s\n' "$*" >>"${PTREAL_TMUX_LOG:?}"
-if [ "${PTREAL_FAIL:-}" = create ] && [ "${1:-}" = new-window ]; then
-  exit 1
-fi
-if [ "${PTREAL_FAIL:-}" = bind ] && [ "${1:-}" = list-panes ]; then
-  exit 1
-fi
-case "$*" in
-  *'#{pane_current_path}'*) printf '%s\n' "${PTREAL_PANE_PATH:?}"; exit 0 ;;
-esac
-if [ "${1:-}" = new-window ]; then
-  out=$("${PTREAL_TMUX:?}" -f /dev/null -L "${PTREAL_SOCKET:?}" "$@") || exit $?
-  sleep 0.2
-  printf '%s\n' "$out"
-  exit 0
-fi
-exec "${PTREAL_TMUX:?}" -f /dev/null -L "${PTREAL_SOCKET:?}" "$@"
-SH
-  cat > "$fakebin/codex" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >"${PTREAL_HARNESS_LOG:?}"
-: >"${PTREAL_HARNESS_STARTED:?}"
-sleep 30
-SH
-  chmod +x "$fakebin/tmux" "$fakebin/codex"
-}
-
-run_real_tmux_spawn() {
-  local case_dir=$1 home=$2 proj=$3 wt=$4 fakebin=$5 id=$6 harness=$7 failure=$8
-  env -u TMUX HOME="$home" XDG_CONFIG_HOME="$home/.config" FM_ROOT_OVERRIDE='' FM_HOME="$home" \
-    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
-    FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_SPAWN_NO_GUARD=1 PTREAL_TMUX="$REAL_TMUX" PTREAL_SOCKET="$REAL_TMUX_SOCKET" \
-    PTREAL_FAIL="$failure" PTREAL_TMUX_LOG="$case_dir/tmux-real.log" \
-    PTREAL_PANE_PATH="$wt" PTREAL_HARNESS_LOG="$case_dir/$harness.log" \
-    PTREAL_HARNESS_STARTED="$case_dir/$harness.started" PTFAKE_LOG="$case_dir/launch.log" \
-    PTFAKE_PANE_PATH="$wt" PTFAKE_ENV_LOG="$case_dir/polytoken-env.log" \
-    FM_POLYTOKEN_READY_POLLS=40 FM_POLYTOKEN_POLL_INTERVAL=0.1 \
-    PATH="$fakebin:$BASE_PATH" \
-    "$SPAWN" "$id" "$proj" --harness "$harness" --model zai/glm-5.3-flash \
-    --effort low --mode no-mistakes --yolo off 2>&1
-}
-
-real_tmux_task_window_exists() {
-  local name=$1
-  "$REAL_TMUX" -f /dev/null -L "$REAL_TMUX_SOCKET" \
-    list-windows -t firstmate -F '#{window_name}' 2>/dev/null | grep -Fqx -- "$name"
-}
-
-test_fresh_tmux_abort_ownership_is_harness_independent() {
-  local harness failure id rec out rc i
-  [ -n "$REAL_TMUX" ] || { echo "skip: tmux not found"; return 0; }
-  for harness in polytoken codex; do
-    for failure in create bind none; do
-      "$REAL_TMUX" -L "$REAL_TMUX_SOCKET" kill-server >/dev/null 2>&1 || true
-      id="${harness}-${failure}-$$"
-      rec=$(make_polytoken_spawn_case "real-$harness-$failure" "$id")
-      read_polytoken_spawn_record "$rec"
-      install_real_tmux_spawn_shims "$FAKEBIN_DIR"
-      : > "$CASE_DIR/tmux-real.log"
-      rc=0
-      out=$(run_real_tmux_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" \
-        "$FAKEBIN_DIR" "$id" "$harness" "$failure") || rc=$?
-      case "$failure" in
-        create)
-          [ "$rc" -ne 0 ] || fail "$harness create failure unexpectedly succeeded"
-          real_tmux_task_window_exists "fm-$id" && fail "$harness create failure left a task window"
-          ;;
-        bind)
-          [ "$rc" -ne 0 ] || fail "$harness bind failure unexpectedly succeeded"
-          real_tmux_task_window_exists "fm-$id" && fail "$harness bind failure stranded its created window"
-          ;;
-        none)
-          expect_code 0 "$rc" "$harness ordinary real-tmux launch should succeed (output: $out)"
-          real_tmux_task_window_exists "fm-$id" || fail "$harness ordinary launch lost its task window"
-          if [ "$harness" = polytoken ]; then
-            [ -s "$CASE_DIR/launch.log" ] || fail "$harness ordinary launch never started its harness stub"
-          else
-            for i in $(seq 1 50); do
-              [ -e "$CASE_DIR/$harness.started" ] && break
-              sleep 0.1
-            done
-            [ -e "$CASE_DIR/$harness.started" ] || fail "$harness ordinary launch never started its harness stub"
-          fi
-          [ -f "$HOME_DIR/state/$id.meta" ] || fail "$harness ordinary launch did not publish metadata"
-          ;;
-      esac
-    done
-  done
-  "$REAL_TMUX" -L "$REAL_TMUX_SOCKET" kill-server >/dev/null 2>&1 || true
-  pass "fm-spawn: fresh tmux abort ownership is harness-independent before launch"
 }
 
 test_polytoken_launch_carries_the_hybrid_contract() {
@@ -1209,22 +1094,6 @@ test_polytoken_existing_project_hook_layer_refuses() {
   pass "fm-spawn: a project's own polytoken hook layer is refused, not clobbered"
 }
 
-test_polytoken_pane_binding_failure_closes_fresh_window() {
-  local id rec out rc=0
-  id="pt-pane-bind-z10-$$"
-  rec=$(make_polytoken_spawn_case pane-bind "$id")
-  read_polytoken_spawn_record "$rec"
-  out=$(PTFAKE_FAIL_LIST_PANES=1 \
-    run_polytoken_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id") || rc=$?
-  [ "$rc" -ne 0 ] || fail "an unreadable fresh pane binding should fail the spawn"
-  assert_contains "$(cat "$CASE_DIR/tmux-calls.log")" "kill-window" \
-    "a post-create pane-binding failure did not close its fresh window"
-  [ ! -s "$FAKEBIN_DIR/.spawn-window" ] \
-    || fail "a post-create pane-binding failure stranded its fresh window"
-  assert_absent "$HOME_DIR/state/$id.meta" "a pane-binding failure published a task record"
-  pass "fm-spawn: pane-binding failure closes its fresh polytoken window"
-}
-
 test_polytoken_whitespace_state_dir_refuses() {
   local id rec out rc spaced
   id="pt-wsstate-z8-$$"
@@ -1354,9 +1223,7 @@ test_polytoken_missing_axes_refuse_before_pane_creation
 test_polytoken_unlisted_model_refuses_before_pane_creation
 test_polytoken_secondmate_is_refused
 test_polytoken_existing_project_hook_layer_refuses
-test_polytoken_pane_binding_failure_closes_fresh_window
 test_polytoken_whitespace_state_dir_refuses
 test_polytoken_readiness_failure_fails_loudly_and_cleans_up
 test_polytoken_post_launch_failure_drops_its_slot_claim
 test_polytoken_spawn_arms_the_busy_contract
-test_fresh_tmux_abort_ownership_is_harness_independent

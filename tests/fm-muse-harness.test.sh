@@ -491,7 +491,7 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
-  fm_write_tmux_meta "$home/state/$id.meta" \
+  fm_write_meta "$home/state/$id.meta" \
     "window=fm-send:0" "tmux_pane_id=%0" "endpoint_task_id=$id" "worktree=$case_dir" \
     "project=$case_dir" "harness=$harness" "kind=ship" "mode=no-mistakes" "yolo=off"
   printf '%s\n' "$case_dir|$home|$fakebin|$id"

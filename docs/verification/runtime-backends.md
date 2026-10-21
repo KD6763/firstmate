@@ -115,35 +115,6 @@ The run did not reach `opencode`, `pi`, `pi-signed`, `grok`, `kimi`, or `muse`, 
 
 ## tmux
 
-### Task pane binding
-
-Verified on 2026-10-19 with tmux 3.2a on Linux x86_64.
-The real-tmux transport regression uses a private socket and raw byte collectors, with no model calls or vendor-screen assumptions.
-The final watcher and transport run used an isolated filesystem and PID namespace, with a writable temporary directory and a separate `FM_PROCEVENT_CLAIM_ROOT`.
-The relaunch fixture drives `fm-control` and `fm-spawn` against a split window and checks that both metadata and every sent key preserve the original pane.
-Other runtime backends retain their recorded endpoints, covered by the metadata tests in `tests/fm-backend.test.sh`.
-
-```sh
-bash bin/fm-test-run.sh tests/fm-control-relaunch.test.sh tests/fm-backend-tmux-smoke.test.sh
-bash bin/fm-test-run.sh --per-script-timeout-secs 1200 tests/fm-watch-triage.test.sh tests/fm-backend-tmux-smoke.test.sh
-```
-
-Relevant output:
-
-```text
-ok - fm-control relaunch: a same-harness relaunch replaces the agent in the same endpoint and worktree
-ok - real tmux: task doorbell, keys and guarding reads stay on the recorded pane with the monitor active
-ok - real tmux: re-rings and a focus change between typing and Enter preserve the agent pane
-ok - real tmux: the watcher retries an aged steer in the recorded pane with the monitor active
-ok - real tmux: Enter retries and the pending-composer guard use the bound pane despite focus changes
-ok - real tmux: task liveness and stale triage read the recorded agent with the monitor active
-ok - real tmux: ambiguous legacy, mismatched, duplicate and stale pane bindings fail closed
-ok - real tmux: lifecycle cleanup retains the whole-window target
-ok - missing windows and panes report once; ambiguous and stale bindings escalate without inspecting another pane
-ok - away-mode missing and ambiguous bindings hand off once, avoid other panes, and re-arm after recovery
-FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=1131070
-```
-
 ### Foreground-process classification
 
 Foreground-process behavior was verified on 2026-07-07 with tmux 3.6a on macOS.

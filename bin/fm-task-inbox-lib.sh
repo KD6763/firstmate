@@ -370,14 +370,6 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
         [ "$target_rc" -eq 2 ] && return 3
         return 2
       fi
-    else
-      if target=$(fm_backend_tmux_task_pane "$target"); then
-        :
-      else
-        target_rc=$?
-        [ "$target_rc" -eq 2 ] && return 3
-        return 2
-      fi
     fi
   fi
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in

@@ -78,8 +78,6 @@ REAL_PS_FOR_TEST=$(command -v ps)
 export REAL_PS_FOR_TEST
 REAL_LSOF_FOR_TEST=$(command -v lsof)
 export REAL_LSOF_FOR_TEST
-REAL_TMUX_FOR_TEST=$(command -v tmux)
-export REAL_TMUX_FOR_TEST
 
 # Build a fresh sandbox for one test case. Sets up:
 #   $CASE/state/        - firstmate state dir (with a fresh watcher beacon)
@@ -680,12 +678,40 @@ backlog_row_state() {
 make_path_without_lsof() {  # <case-dir>
   local case_dir=$1 path_dir="$1/path-without-lsof" cmd resolved
   mkdir -p "$path_dir"
-  for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id jq ln \
-    mkdir mktemp mv node perl ps readlink realpath rm sed sh sleep sort stat tail tasks-axi timeout tr uname wc xargs; do
+  for cmd in awk bash basename cat chmod cp cut date dirname env find git grep head hostname id ln \
+    mkdir mktemp mv perl ps readlink realpath rm sed sh sleep sort stat tail timeout tr uname wc xargs; do
     resolved=$(command -v "$cmd" 2>/dev/null) || continue
     case "$resolved" in /*) ln -sf "$resolved" "$path_dir/$cmd" ;; esac
   done
   printf '%s\n' "$path_dir"
+}
+
+test_pane_metadata_does_not_change_window_teardown() {
+  local case_dir rc binding
+  for binding in absent %1 %999999 invalid empty duplicate; do
+    case_dir=$(make_case "pane-parity-$binding")
+    write_meta "$case_dir" local-only ship
+    wt_commit "$case_dir" "landed work"
+    add_fork_with_pushed_branch "$case_dir"
+    case "$binding" in
+      absent) ;;
+      empty) printf 'tmux_pane_id=\n' >> "$case_dir/state/task-x1.meta" ;;
+      duplicate) printf 'tmux_pane_id=%%1\ntmux_pane_id=%%2\n' >> "$case_dir/state/task-x1.meta" ;;
+      *) printf 'tmux_pane_id=%s\n' "$binding" >> "$case_dir/state/task-x1.meta" ;;
+    esac
+    cat > "$case_dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" >> '$case_dir/tmux.calls'
+exit 0
+SH
+    chmod +x "$case_dir/fakebin/tmux"
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"; rc=$?
+    expect_code 0 "$rc" "teardown changed with $binding pane metadata"
+    [ ! -e "$case_dir/state/task-x1.meta" ] || fail "teardown retained $binding metadata"
+    grep -q '^kill-window -t .*:fm-task-x1$' "$case_dir/tmux.calls" \
+      || fail "teardown lost its window target with $binding metadata"
+  done
+  pass "teardown: bound, malformed and unbound pane fields retain window-based cleanup"
 }
 
 test_local_only_fork_remote_allows() {
@@ -1836,313 +1862,6 @@ SH
   chmod +x "$case_dir/fakebin/tmux"
 }
 
-add_private_tmux_socket() {
-  local case_dir=$1
-  cat > "$case_dir/fakebin/tmux" <<SH
-#!/usr/bin/env bash
-if [ -e "$case_dir/tmux-unreadable" ]; then
-  case "\${1:-}" in
-    list-windows|list-panes) echo "error connecting to fixture: permission denied" >&2; exit 1 ;;
-  esac
-fi
-exec "$REAL_TMUX_FOR_TEST" -S "$case_dir/tmux.sock" "\$@"
-SH
-  chmod +x "$case_dir/fakebin/tmux"
-}
-
-prepare_landed_legacy_tmux_case() {
-  local case_dir=$1
-  write_legacy_meta "$case_dir" no-mistakes ship
-  seed_backlog_in_flight "$case_dir"
-  wt_commit "$case_dir" "landed legacy work"
-  add_fork_with_pushed_branch "$case_dir"
-  add_private_tmux_socket "$case_dir"
-}
-
-assert_legacy_endpoint_refusal() {
-  local case_dir=$1 label=$2 before=$3 rc=$4
-  expect_code 1 "$rc" "$label: legacy teardown must preserve the endpoint-state gate"
-  grep -q "not confidently dead or agent-less" "$case_dir/stderr" \
-    || fail "$label: refusal did not name the existing legacy endpoint gate"
-  [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$before" ] \
-    || fail "$label: refusal modified the task record"
-  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
-    || fail "$label: refusal closed the backlog item"
-}
-
-assert_bound_tmux_refusal() {
-  local case_dir=$1 label=$2 meta=$3 before=$4 rc=$5
-  expect_code 1 "$rc" "$label: teardown must refuse an unverified recorded pane"
-  grep -q "recorded agent pane is not verified" "$case_dir/stderr" \
-    || fail "$label: refusal did not name the unverified recorded pane"
-  [ "$(cksum "$meta" | awk '{print $1, $2}')" = "$before" ] \
-    || fail "$label: refusal modified $meta"
-  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
-    || fail "$label: refusal closed the backlog item"
-}
-
-test_legacy_record_authority_uses_the_agent_pane() {
-  local case_dir agent_pane agent_pid monitor_pane destination_pane before rc out
-
-  case_dir=$(make_case legacy-split-live)
-  prepare_landed_legacy_tmux_case "$case_dir"
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1 \
-    "bash -c 'exec -a codex sleep 300'"
-  agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
-  printf 'tmux_pane_id=%s\n' "$agent_pane" >> "$case_dir/state/task-x1.meta"
-  agent_pid=$("$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_pid}')
-  monitor_pane=$("$case_dir/fakebin/tmux" split-window -d -P -F '#{pane_id}' -t firstmate:fm-task-x1)
-  destination_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n moved-agent)
-  "$case_dir/fakebin/tmux" join-pane -d -s "$agent_pane" -t "$destination_pane"
-  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-moved-live: fake agent exited before teardown"
-  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-  rc=0
-  run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  assert_bound_tmux_refusal "$case_dir" legacy-moved-live "$case_dir/state/task-x1.meta" "$before" "$rc"
-  [ "$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')" = "$monitor_pane" ] \
-    || fail "legacy-moved-live: refusal did not preserve the surviving monitor"
-  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-moved-live: refusal terminated the moved live agent"
-  "$case_dir/fakebin/tmux" kill-server
-
-  case_dir=$(make_case legacy-single-live)
-  prepare_landed_legacy_tmux_case "$case_dir"
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1 \
-    "bash -c 'exec -a codex sleep 300'"
-  agent_pid=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_pid}')
-  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-  rc=0
-  run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  assert_legacy_endpoint_refusal "$case_dir" legacy-single-live "$before" "$rc"
-  kill -0 "$agent_pid" 2>/dev/null || fail "legacy-single-live: refusal terminated the live agent"
-  "$case_dir/fakebin/tmux" kill-server
-
-  case_dir=$(make_case legacy-single-dead)
-  prepare_landed_legacy_tmux_case "$case_dir"
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-  "$case_dir/fakebin/tmux" new-window -d -t firstmate: -n neighbor
-  out=$(run_teardown "$case_dir" --legacy-record) \
-    || fail "legacy-single-dead: baseline dead-window teardown refused"
-  assert_absent "$case_dir/state/task-x1.meta" "legacy-single-dead: record survived"
-  [ "$(backlog_row_state "$case_dir")" = "done" ] \
-    || fail "legacy-single-dead: backlog did not close"
-  "$case_dir/fakebin/tmux" has-session -t firstmate \
-    || fail "legacy-single-dead: teardown removed the neighboring window"
-  "$case_dir/fakebin/tmux" kill-server
-
-  case_dir=$(make_case legacy-unbound-retired)
-  prepare_landed_legacy_tmux_case "$case_dir"
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-  "$case_dir/fakebin/tmux" new-window -d -t firstmate: -n neighbor
-  "$case_dir/fakebin/tmux" kill-window -t '=firstmate:=fm-task-x1'
-  out=$(run_teardown "$case_dir" --legacy-record) \
-    || fail "legacy-unbound-retired: closed unbound window could not be retired"
-  assert_absent "$case_dir/state/task-x1.meta" "legacy-unbound-retired: record survived"
-  [ "$(backlog_row_state "$case_dir")" = "done" ] \
-    || fail "legacy-unbound-retired: backlog did not close"
-  "$case_dir/fakebin/tmux" has-session -t firstmate \
-    || fail "legacy-unbound-retired: retirement closed the neighboring window"
-  "$case_dir/fakebin/tmux" kill-server
-
-  case_dir=$(make_case legacy-pane-missing)
-  prepare_landed_legacy_tmux_case "$case_dir"
-  printf '%s\n' 'tmux_pane_id=%999999999' >> "$case_dir/state/task-x1.meta"
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-  out=$(run_teardown "$case_dir" --legacy-record) \
-    || fail "legacy-pane-missing: teardown refused a proven-missing recorded pane"
-  printf '%s\n' "$out" | grep -Fq 'legacy record accepted without spawn_gen: endpoint missing' \
-    || fail "legacy-pane-missing: completion did not report the missing recorded pane"
-  assert_absent "$case_dir/state/task-x1.meta" \
-    "legacy-pane-missing: teardown left the task record"
-
-  case_dir=$(make_case legacy-inventory-unreadable)
-  prepare_landed_legacy_tmux_case "$case_dir"
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-  : > "$case_dir/tmux-unreadable"
-  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-  rc=0
-  run_teardown "$case_dir" --legacy-record > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  assert_legacy_endpoint_refusal "$case_dir" legacy-inventory-unreadable "$before" "$rc"
-  rm -f "$case_dir/tmux-unreadable"
-  "$case_dir/fakebin/tmux" has-session -t firstmate \
-    || fail "legacy-inventory-unreadable: refusal removed the lifecycle window"
-  "$case_dir/fakebin/tmux" kill-server
-  pass "legacy teardown retains its endpoint-state gate and verifies any recorded pane"
-}
-
-test_unbound_record_preserves_window_teardown_compatibility() {
-  local scenario case_dir out sentinel_pane
-
-  for scenario in live unreadable absent no-server; do
-    case_dir=$(make_case "unbound-compatible-$scenario")
-    write_meta "$case_dir" no-mistakes ship
-    seed_backlog_in_flight "$case_dir"
-    wt_commit "$case_dir" "landed unbound work"
-    add_fork_with_pushed_branch "$case_dir"
-    add_private_tmux_socket "$case_dir"
-    if [ "$scenario" != no-server ]; then
-      "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-      sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
-    fi
-    case "$scenario" in
-      unreadable) : > "$case_dir/tmux-unreadable" ;;
-      absent) "$case_dir/fakebin/tmux" kill-window -t '=firstmate:=fm-task-x1' ;;
-    esac
-    out=$(run_teardown "$case_dir") \
-      || fail "unbound-compatible-$scenario: baseline window teardown refused"
-    printf '%s\n' "$out" | grep -Fq 'teardown task-x1 complete' \
-      || fail "unbound-compatible-$scenario: completion not reported"
-    assert_absent "$case_dir/state/task-x1.meta" \
-      "unbound-compatible-$scenario: record survived"
-    [ "$(backlog_row_state "$case_dir")" = "done" ] \
-      || fail "unbound-compatible-$scenario: backlog did not close"
-    rm -f "$case_dir/tmux-unreadable"
-    if [ "$scenario" != no-server ]; then
-      "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
-        || fail "unbound-compatible-$scenario: neighboring pane was removed"
-      "$case_dir/fakebin/tmux" kill-server
-    fi
-  done
-  pass "unbound records retain window teardown behavior without a new absence proof"
-}
-
-test_invalid_tmux_pane_bindings_refuse_teardown() {
-  local form case_dir before rc sentinel_pane
-
-  for form in empty malformed duplicate; do
-    case_dir=$(make_case "invalid-pane-$form")
-    write_meta "$case_dir" no-mistakes ship
-    case "$form" in
-      empty) printf '%s\n' 'tmux_pane_id=' >> "$case_dir/state/task-x1.meta" ;;
-      malformed) printf '%s\n' 'tmux_pane_id=pane-1' >> "$case_dir/state/task-x1.meta" ;;
-      duplicate)
-        printf '%s\n' 'tmux_pane_id=%1' 'tmux_pane_id=%2' \
-          >> "$case_dir/state/task-x1.meta"
-        ;;
-    esac
-    seed_backlog_in_flight "$case_dir"
-    wt_commit "$case_dir" "landed invalid pane work"
-    add_fork_with_pushed_branch "$case_dir"
-    add_private_tmux_socket "$case_dir"
-    "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-    sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
-    before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-    rc=0
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-    assert_bound_tmux_refusal "$case_dir" "invalid-pane-$form" "$case_dir/state/task-x1.meta" "$before" "$rc"
-    "$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{window_name}' >/dev/null \
-      || fail "invalid-pane-$form: refusal removed the task window"
-    "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
-      || fail "invalid-pane-$form: refusal removed the neighboring pane"
-    "$case_dir/fakebin/tmux" kill-server
-  done
-  pass "invalid tmux pane bindings refuse teardown without a legacy fallback"
-}
-
-test_secondmate_invalid_tmux_pane_binding_preserves_home() {
-  local case_dir home before rc sentinel_pane
-
-  case_dir=$(make_case secondmate-invalid-pane)
-  write_meta "$case_dir" local-only secondmate
-  printf '%s\n' 'tmux_pane_id=not-a-pane' >> "$case_dir/state/task-x1.meta"
-  home="$case_dir/secondmate-home"
-  mkdir -p "$home/state" "$home/data" "$home/config" "$home/projects"
-  printf '%s\n' task-x1 > "$home/.fm-secondmate-home"
-  printf '%s\n' "home=$home" >> "$case_dir/state/task-x1.meta"
-  seed_backlog_in_flight "$case_dir" secondmate
-  add_private_tmux_socket "$case_dir"
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-  sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
-  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-  rc=0
-  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  assert_bound_tmux_refusal "$case_dir" secondmate-invalid-pane "$case_dir/state/task-x1.meta" "$before" "$rc"
-  [ -d "$home" ] || fail "secondmate-invalid-pane: refusal removed the secondmate home"
-  "$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{window_name}' >/dev/null \
-    || fail "secondmate-invalid-pane: refusal removed the task window"
-  "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
-    || fail "secondmate-invalid-pane: refusal removed the neighboring pane"
-  "$case_dir/fakebin/tmux" kill-server
-  pass "secondmate teardown refuses an invalid tmux pane binding"
-}
-
-test_bound_tmux_preflight_refuses_moved_and_unreadable_panes() {
-  local scenario case_dir agent_pane monitor_pane neighbor_pane before rc
-
-  for scenario in moved unreadable; do
-    case_dir=$(make_case "bound-pane-$scenario")
-    write_meta "$case_dir" no-mistakes ship
-    seed_backlog_in_flight "$case_dir"
-    wt_commit "$case_dir" "landed bound pane work"
-    add_fork_with_pushed_branch "$case_dir"
-    add_private_tmux_socket "$case_dir"
-    "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-    agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
-    printf '%s\n' "tmux_pane_id=$agent_pane" >> "$case_dir/state/task-x1.meta"
-    monitor_pane=$("$case_dir/fakebin/tmux" split-window -d -P -F '#{pane_id}' -t firstmate:fm-task-x1)
-    neighbor_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
-    if [ "$scenario" = moved ]; then
-      "$case_dir/fakebin/tmux" join-pane -d -s "$agent_pane" -t "$neighbor_pane"
-    else
-      : > "$case_dir/tmux-unreadable"
-    fi
-    before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-    rc=0
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-    assert_bound_tmux_refusal \
-      "$case_dir" "bound-pane-$scenario" "$case_dir/state/task-x1.meta" "$before" "$rc"
-    rm -f "$case_dir/tmux-unreadable"
-    "$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_id}' >/dev/null \
-      || fail "bound-pane-$scenario: refusal removed the recorded agent pane"
-    "$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_id}' >/dev/null \
-      || fail "bound-pane-$scenario: refusal removed the monitor pane"
-    "$case_dir/fakebin/tmux" display-message -p -t "$neighbor_pane" '#{pane_id}' >/dev/null \
-      || fail "bound-pane-$scenario: refusal removed the neighboring pane"
-    "$case_dir/fakebin/tmux" kill-server
-  done
-  pass "bound tmux teardown refuses moved and unreadable panes"
-}
-
-test_secondmate_bound_tmux_preflight_refuses_moved_and_unreadable_panes() {
-  local scenario case_dir home agent_pane monitor_pane neighbor_pane before rc
-
-  for scenario in moved unreadable; do
-    case_dir=$(make_case "secondmate-bound-pane-$scenario")
-    write_meta "$case_dir" local-only secondmate
-    home="$case_dir/secondmate-home"
-    mkdir -p "$home/state" "$home/data" "$home/config" "$home/projects"
-    printf '%s\n' task-x1 > "$home/.fm-secondmate-home"
-    printf '%s\n' "home=$home" >> "$case_dir/state/task-x1.meta"
-    seed_backlog_in_flight "$case_dir" secondmate
-    add_private_tmux_socket "$case_dir"
-    "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1
-    agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
-    printf '%s\n' "tmux_pane_id=$agent_pane" >> "$case_dir/state/task-x1.meta"
-    monitor_pane=$("$case_dir/fakebin/tmux" split-window -d -P -F '#{pane_id}' -t firstmate:fm-task-x1)
-    neighbor_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
-    if [ "$scenario" = moved ]; then
-      "$case_dir/fakebin/tmux" join-pane -d -s "$agent_pane" -t "$neighbor_pane"
-    else
-      : > "$case_dir/tmux-unreadable"
-    fi
-    before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-    rc=0
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-    assert_bound_tmux_refusal \
-      "$case_dir" "secondmate-bound-pane-$scenario" "$case_dir/state/task-x1.meta" "$before" "$rc"
-    [ -d "$home" ] && [ -e "$home/.fm-secondmate-home" ] \
-      || fail "secondmate-bound-pane-$scenario: refusal removed the secondmate home identity"
-    rm -f "$case_dir/tmux-unreadable"
-    "$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_id}' >/dev/null \
-      || fail "secondmate-bound-pane-$scenario: refusal removed the recorded agent pane"
-    "$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_id}' >/dev/null \
-      || fail "secondmate-bound-pane-$scenario: refusal removed the monitor pane"
-    "$case_dir/fakebin/tmux" display-message -p -t "$neighbor_pane" '#{pane_id}' >/dev/null \
-      || fail "secondmate-bound-pane-$scenario: refusal removed the neighboring pane"
-    "$case_dir/fakebin/tmux" kill-server
-  done
-  pass "secondmate teardown refuses moved and unreadable bound panes"
-}
-
 test_legacy_record_without_the_flag_refuses() {
   local case_dir rc
   case_dir=$(make_case legacy-noflag)
@@ -2335,16 +2054,18 @@ test_windowless_leftover_retries_its_retained_legacy_stamp_without_the_flag() {
   pass "a windowless leftover retries its retained legacy stamp without --legacy-record"
 }
 
-test_legacy_record_teardown_completes_when_landed_and_endpoint_missing() {
+test_legacy_record_teardown_completes_when_landed_and_endpoint_dead() {
   local case_dir out
   case_dir=$(make_case legacy-allow)
   write_legacy_meta "$case_dir" no-mistakes ship
-  printf '%s\n' 'tmux_pane_id=%999999999' >> "$case_dir/state/task-x1.meta"
   seed_backlog_in_flight "$case_dir"
   wt_commit "$case_dir" "landed legacy work"
   add_fork_with_pushed_branch "$case_dir"
+  # The default fakebin tmux answers every query with success and no output, so
+  # the classifier reads the recorded window as authoritatively missing.
+
   out=$(run_teardown "$case_dir" --legacy-record) \
-    || fail "legacy-allow: teardown refused a landed legacy record with a missing endpoint"
+    || fail "legacy-allow: teardown refused a landed legacy record with a dead endpoint"
   [ "$(backlog_row_state "$case_dir")" = "done" ] \
     || fail "legacy-allow: teardown returned success with its backlog item still open"
   printf '%s\n' "$out" | grep -Fq 'legacy record accepted without spawn_gen: endpoint missing, incarnation legacy-' \
@@ -2353,7 +2074,7 @@ test_legacy_record_teardown_completes_when_landed_and_endpoint_missing() {
     "legacy-allow: a landed legacy close left its pending-close record behind"
   assert_absent "$case_dir/state/task-x1.meta" \
     "legacy-allow: teardown left the task record behind"
-  pass "a landed legacy record with a missing endpoint tears down and logs its accepted incarnation"
+  pass "a landed legacy record with a dead endpoint tears down and logs its accepted incarnation"
 }
 
 test_legacy_record_teardown_refuses_unlanded_work() {
@@ -2397,7 +2118,13 @@ test_legacy_record_teardown_refuses_an_ambiguous_endpoint() {
   rc=$?
   set -e
 
-  assert_legacy_endpoint_refusal "$case_dir" legacy-ambiguous "$before" "$rc"
+  expect_code 1 "$rc" "legacy-ambiguous: an unreadable endpoint must refuse the legacy acceptance"
+  grep -q "not confidently dead or agent-less" "$case_dir/stderr" \
+    || fail "legacy-ambiguous: the refusal did not name the endpoint state"
+  [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$before" ] \
+    || fail "legacy-ambiguous: the endpoint refusal modified the task record"
+  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
+    || fail "legacy-ambiguous: the endpoint refusal closed the backlog item anyway"
   pass "an endpoint that cannot be confidently read as dead refuses --legacy-record teardown"
 }
 
@@ -2405,7 +2132,7 @@ test_legacy_record_rolls_the_stamp_back_when_the_marker_write_fails() {
   local case_dir rc before
   case_dir=$(make_case legacy-stamp-rollback)
   write_legacy_meta "$case_dir" no-mistakes ship
-  printf '%s\n' 'tmux_pane_id=%999999999' 'pr=not-a-valid-url' >> "$case_dir/state/task-x1.meta"
+  printf '%s\n' 'pr=not-a-valid-url' >> "$case_dir/state/task-x1.meta"
   seed_backlog_in_flight "$case_dir"
   wt_commit "$case_dir" "landed legacy work"
   add_fork_with_pushed_branch "$case_dir"
@@ -2458,7 +2185,7 @@ test_retained_legacy_stamp_still_faces_the_endpoint_gate() {
   local case_dir rc stamped
   case_dir=$(make_case legacy-stamp-retained)
   write_legacy_meta "$case_dir" no-mistakes ship
-  printf '%s\n' 'tmux_pane_id=%999999999' 'pr=not-a-valid-url' >> "$case_dir/state/task-x1.meta"
+  printf '%s\n' 'pr=not-a-valid-url' >> "$case_dir/state/task-x1.meta"
   seed_backlog_in_flight "$case_dir"
   wt_commit "$case_dir" "landed legacy work"
   add_fork_with_pushed_branch "$case_dir"
@@ -2486,8 +2213,8 @@ test_retained_legacy_stamp_still_faces_the_endpoint_gate() {
   set -e
   expect_code 1 "$rc" \
     "legacy-stamp-retained: the retry must re-run the endpoint gate on the retained stamp"
-  grep -q "recorded agent pane is not verified" "$case_dir/stderr2" \
-    || fail "legacy-stamp-retained: the retry skipped the recorded-pane authority gate"
+  grep -q "not confidently dead or agent-less" "$case_dir/stderr2" \
+    || fail "legacy-stamp-retained: the retry skipped the dead-or-agent-less endpoint gate"
   [ "$(legacy_meta_gen_count "$case_dir")" = 1 ] \
     || fail "legacy-stamp-retained: the retry stamped a second incarnation into the record"
   [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$stamped" ] \
@@ -3646,90 +3373,6 @@ configure_secondmate_with_tmux_children() {  # <case-dir>
       "mode=local-only"
     : > "$home/state/$child.status"
   done
-}
-
-test_forced_secondmate_invalid_child_pane_binding_preserves_state() {
-  local case_dir home parent_before child_before rc sentinel_pane
-
-  case_dir=$(make_case invalid-child-pane)
-  write_meta "$case_dir" local-only secondmate
-  configure_secondmate_with_tmux_children "$case_dir"
-  home="$case_dir/secondmate-home"
-  printf '%s\n' 'tmux_pane_id=%1' 'tmux_pane_id=%2' \
-    >> "$home/state/child-a.meta"
-  seed_backlog_in_flight "$case_dir" secondmate
-  add_private_tmux_socket "$case_dir"
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-child-a
-  sentinel_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
-  parent_before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-  child_before=$(cksum "$home/state/child-a.meta" | awk '{print $1, $2}')
-  rc=0
-  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  expect_code 1 "$rc" "invalid-child-pane: forced teardown must refuse an invalid child binding"
-  grep -q "task child-a's recorded agent pane is not verified" "$case_dir/stderr" \
-    || fail "invalid-child-pane: refusal did not name the invalid child binding"
-  [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$parent_before" ] \
-    || fail "invalid-child-pane: refusal modified the parent record"
-  [ "$(cksum "$home/state/child-a.meta" | awk '{print $1, $2}')" = "$child_before" ] \
-    || fail "invalid-child-pane: refusal modified the child record"
-  [ -e "$home/state/child-b.meta" ] && [ -d "$home" ] \
-    || fail "invalid-child-pane: refusal removed neighboring child or home state"
-  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
-    || fail "invalid-child-pane: refusal closed the backlog item"
-  "$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-child-a '#{window_name}' >/dev/null \
-    || fail "invalid-child-pane: refusal removed the child window"
-  "$case_dir/fakebin/tmux" display-message -p -t "$sentinel_pane" '#{pane_id}' >/dev/null \
-    || fail "invalid-child-pane: refusal removed the neighboring pane"
-  "$case_dir/fakebin/tmux" kill-server
-  pass "forced secondmate teardown refuses an invalid child pane binding"
-}
-
-test_forced_secondmate_bound_child_preflight_refuses_moved_and_unreadable_panes() {
-  local scenario case_dir home child_meta agent_pane monitor_pane neighbor_pane parent_before child_before sibling_before rc
-
-  for scenario in moved unreadable; do
-    case_dir=$(make_case "bound-child-pane-$scenario")
-    write_meta "$case_dir" local-only secondmate
-    configure_secondmate_with_tmux_children "$case_dir"
-    home="$case_dir/secondmate-home"
-    child_meta="$home/state/child-a.meta"
-    seed_backlog_in_flight "$case_dir" secondmate
-    add_private_tmux_socket "$case_dir"
-    "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-child-a
-    agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-child-a '#{pane_id}')
-    printf '%s\n' "tmux_pane_id=$agent_pane" >> "$child_meta"
-    monitor_pane=$("$case_dir/fakebin/tmux" split-window -d -P -F '#{pane_id}' -t firstmate:fm-child-a)
-    neighbor_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n neighbor)
-    if [ "$scenario" = moved ]; then
-      "$case_dir/fakebin/tmux" join-pane -d -s "$agent_pane" -t "$neighbor_pane"
-    else
-      : > "$case_dir/tmux-unreadable"
-    fi
-    parent_before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-    child_before=$(cksum "$child_meta" | awk '{print $1, $2}')
-    sibling_before=$(cksum "$home/state/child-b.meta" | awk '{print $1, $2}')
-    rc=0
-    run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-    assert_bound_tmux_refusal \
-      "$case_dir" "bound-child-pane-$scenario" "$child_meta" "$child_before" "$rc"
-    [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$parent_before" ] \
-      || fail "bound-child-pane-$scenario: refusal modified the parent record"
-    [ "$(cksum "$home/state/child-b.meta" | awk '{print $1, $2}')" = "$sibling_before" ] \
-      || fail "bound-child-pane-$scenario: refusal modified the sibling record"
-    [ -e "$home/state/child-a.status" ] && [ -e "$home/state/child-b.status" ] \
-      || fail "bound-child-pane-$scenario: refusal removed child status state"
-    [ -d "$home" ] && [ -d "$case_dir/child-a-wt" ] && [ -d "$case_dir/child-b-wt" ] \
-      || fail "bound-child-pane-$scenario: refusal removed home or worktree state"
-    rm -f "$case_dir/tmux-unreadable"
-    "$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_id}' >/dev/null \
-      || fail "bound-child-pane-$scenario: refusal removed the recorded agent pane"
-    "$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_id}' >/dev/null \
-      || fail "bound-child-pane-$scenario: refusal removed the monitor pane"
-    "$case_dir/fakebin/tmux" display-message -p -t "$neighbor_pane" '#{pane_id}' >/dev/null \
-      || fail "bound-child-pane-$scenario: refusal removed the neighboring pane"
-    "$case_dir/fakebin/tmux" kill-server
-  done
-  pass "forced secondmate teardown refuses moved and unreadable child panes"
 }
 
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
@@ -5129,130 +4772,6 @@ EOF
   pass "missing lsof falls back to reaping the tmux pane process group"
 }
 
-test_lsof_absent_reaps_only_bound_agent_pane() {
-  local case_dir rc agent_pane monitor_pane agent_pid monitor_pid path_without_lsof result
-  case_dir=$(make_case lsof-absent-bound-agent-reap)
-  write_meta "$case_dir" no-mistakes ship
-  land_shippable_commit "$case_dir"
-  add_private_tmux_socket "$case_dir"
-  path_without_lsof=$(make_path_without_lsof "$case_dir")
-  PATH="$path_without_lsof" command -v lsof >/dev/null 2>&1 \
-    && fail "lsof-absent-bound-agent-reap: fixture path unexpectedly exposes lsof"
-
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1 'exec sleep 300'
-  agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
-  agent_pid=$("$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_pid}')
-  printf 'tmux_pane_id=%s\n' "$agent_pane" >> "$case_dir/state/task-x1.meta"
-  monitor_pane=$("$case_dir/fakebin/tmux" split-window -P -F '#{pane_id}' -t firstmate:fm-task-x1 'exec sleep 300')
-  monitor_pid=$("$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_pid}')
-  "$case_dir/fakebin/tmux" select-pane -t "$monitor_pane"
-  kill -0 "$agent_pid" 2>/dev/null || fail "lsof-absent-bound-agent-reap: agent pane process did not start"
-  kill -0 "$monitor_pid" 2>/dev/null || fail "lsof-absent-bound-agent-reap: monitor pane process did not start"
-  cat > "$case_dir/fakebin/treehouse" <<EOF
-#!/usr/bin/env bash
-if kill -0 '$agent_pid' 2>/dev/null; then
-  printf '%s\n' agent-live > '$case_dir/reap-boundary'
-  exit 1
-fi
-if ! kill -0 '$monitor_pid' 2>/dev/null; then
-  printf '%s\n' monitor-dead > '$case_dir/reap-boundary'
-  exit 1
-fi
-printf '%s\n' agent-gone-monitor-live > '$case_dir/reap-boundary'
-exit 0
-EOF
-  chmod +x "$case_dir/fakebin/treehouse"
-
-  rc=0
-  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  result=$(cat "$case_dir/reap-boundary" 2>/dev/null || true)
-  "$case_dir/fakebin/tmux" kill-server >/dev/null 2>&1 || true
-
-  expect_code 0 "$rc" "lsof-absent-bound-agent-reap: teardown should succeed"
-  [ "$result" = agent-gone-monitor-live ] \
-    || fail "lsof-absent-bound-agent-reap: worktree return observed '$result'"
-  assert_grep "reaping leaked worktree process group" "$case_dir/stderr" \
-    "lsof-absent-bound-agent-reap: teardown did not reap the agent process group"
-  pass "missing lsof reaps the bound agent pane without signaling the active monitor"
-}
-
-test_lsof_absent_refuses_bound_pane_moved_after_preflight() {
-  local case_dir rc agent_pane monitor_pane destination_pane before after path_without_lsof
-  case_dir=$(make_case lsof-absent-bound-pane-moved)
-  write_meta "$case_dir" no-mistakes ship
-  seed_backlog_in_flight "$case_dir"
-  land_shippable_commit "$case_dir"
-  add_private_tmux_socket "$case_dir"
-  path_without_lsof=$(make_path_without_lsof "$case_dir")
-  "$case_dir/fakebin/tmux" new-session -d -s firstmate -n fm-task-x1 'exec sleep 300'
-  agent_pane=$("$case_dir/fakebin/tmux" display-message -p -t firstmate:fm-task-x1 '#{pane_id}')
-  printf 'tmux_pane_id=%s\n' "$agent_pane" >> "$case_dir/state/task-x1.meta"
-  monitor_pane=$("$case_dir/fakebin/tmux" split-window -d -P -F '#{pane_id}' -t firstmate:fm-task-x1 'exec sleep 300')
-  destination_pane=$("$case_dir/fakebin/tmux" new-window -d -P -F '#{pane_id}' -t firstmate: -n moved-agent 'exec sleep 300')
-  cat > "$case_dir/fakebin/tmux" <<EOF
-#!/usr/bin/env bash
-if [ "\${1:-}" = list-panes ]; then
-  count=0
-  [ ! -f '$case_dir/list-panes-count' ] || count=\$(cat '$case_dir/list-panes-count')
-  count=\$((count + 1))
-  printf '%s\n' "\$count" > '$case_dir/list-panes-count'
-  if [ "\$count" -eq 2 ]; then
-    "$REAL_TMUX_FOR_TEST" -S "$case_dir/tmux.sock" join-pane -d -s '$agent_pane' -t '$destination_pane'
-  fi
-fi
-exec "$REAL_TMUX_FOR_TEST" -S "$case_dir/tmux.sock" "\$@"
-EOF
-  cat > "$case_dir/fakebin/treehouse" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' return > '$case_dir/treehouse.log'
-exit 0
-EOF
-  chmod +x "$case_dir/fakebin/tmux" "$case_dir/fakebin/treehouse"
-  before=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-
-  rc=0
-  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  expect_code 1 "$rc" "lsof-absent-bound-pane-moved: teardown must refuse pane movement"
-  assert_grep "recorded agent pane is not verified" "$case_dir/stderr" \
-    "lsof-absent-bound-pane-moved: refusal did not name the unverified recorded pane"
-  [ "$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')" = "$before" ] \
-    || fail "lsof-absent-bound-pane-moved: refusal modified task metadata"
-  assert_absent "$case_dir/state/task-x1.backlog-close" \
-    "lsof-absent-bound-pane-moved: refusal left a replayable backlog close"
-  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
-    || fail "lsof-absent-bound-pane-moved: refusal changed the backlog row"
-  assert_absent "$case_dir/treehouse.log" \
-    "lsof-absent-bound-pane-moved: teardown returned the worktree after pane movement"
-  [ -d "$case_dir/wt" ] || fail "lsof-absent-bound-pane-moved: refusal removed the worktree"
-  "$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_id}' >/dev/null \
-    || fail "lsof-absent-bound-pane-moved: refusal removed the agent pane"
-  "$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_id}' >/dev/null \
-    || fail "lsof-absent-bound-pane-moved: refusal removed the monitor pane"
-
-  rc=0
-  FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$case_dir" \
-    FM_STATE_OVERRIDE="$case_dir/state" FM_DATA_OVERRIDE="$case_dir/data" \
-    FM_CONFIG_OVERRIDE="$case_dir/config" FM_BOOTSTRAP_NETWORK=skip \
-    PATH="$case_dir/fakebin:$PATH" \
-    "$ROOT/bin/fm-bootstrap.sh" > "$case_dir/bootstrap.stdout" 2> "$case_dir/bootstrap.stderr" || rc=$?
-  expect_code 0 "$rc" "lsof-absent-bound-pane-moved: bootstrap replay should complete"
-  after=$(cksum "$case_dir/state/task-x1.meta" | awk '{print $1, $2}')
-  [ "$after" = "$before" ] \
-    || fail "lsof-absent-bound-pane-moved: bootstrap replay modified task metadata"
-  assert_absent "$case_dir/state/task-x1.backlog-close" \
-    "lsof-absent-bound-pane-moved: bootstrap found a replayable backlog close"
-  [ "$(backlog_row_state "$case_dir")" = in_flight ] \
-    || fail "lsof-absent-bound-pane-moved: bootstrap replay changed the backlog row"
-  "$case_dir/fakebin/tmux" display-message -p -t "$agent_pane" '#{pane_id}' >/dev/null \
-    || fail "lsof-absent-bound-pane-moved: bootstrap removed the agent pane"
-  "$case_dir/fakebin/tmux" display-message -p -t "$monitor_pane" '#{pane_id}' >/dev/null \
-    || fail "lsof-absent-bound-pane-moved: bootstrap removed the monitor pane"
-  "$case_dir/fakebin/tmux" kill-server >/dev/null 2>&1 || true
-  pass "missing lsof pane-move refusal remains inert across bootstrap replay"
-}
-
 test_lsof_error_refuses_before_removal() {
   local case_dir rc
   case_dir=$(make_case lsof-error-refusal)
@@ -5752,8 +5271,6 @@ test_herdr_flat_teardown_refuses_records_on_unparseable_presence
 test_herdr_flat_teardown_preflight_refuses_before_changes
 test_herdr_teardown_presentation_lock_namespace_is_per_account
 test_forced_secondmate_herdr_child_preflight_refuses_before_changes
-test_forced_secondmate_invalid_child_pane_binding_preserves_state
-test_forced_secondmate_bound_child_preflight_refuses_moved_and_unreadable_panes
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks
 test_forced_secondmate_herdr_child_retains_records_when_close_unconfirmed
 test_forced_teardown_retains_nested_secondmate_home_when_grandchild_close_unconfirmed
@@ -5799,13 +5316,7 @@ test_windowless_legacy_record_tears_down_with_the_legacy_flag
 test_windowless_legacy_record_still_refuses_unlanded_work
 test_windowless_record_outside_the_leftover_class_still_refuses
 test_windowless_leftover_retries_its_retained_legacy_stamp_without_the_flag
-test_legacy_record_teardown_completes_when_landed_and_endpoint_missing
-test_legacy_record_authority_uses_the_agent_pane
-test_unbound_record_preserves_window_teardown_compatibility
-test_invalid_tmux_pane_bindings_refuse_teardown
-test_secondmate_invalid_tmux_pane_binding_preserves_home
-test_bound_tmux_preflight_refuses_moved_and_unreadable_panes
-test_secondmate_bound_tmux_preflight_refuses_moved_and_unreadable_panes
+test_legacy_record_teardown_completes_when_landed_and_endpoint_dead
 test_legacy_record_teardown_refuses_unlanded_work
 test_legacy_record_teardown_refuses_an_ambiguous_endpoint
 test_legacy_record_rolls_the_stamp_back_when_the_marker_write_fails
@@ -5850,8 +5361,6 @@ test_own_autonomous_run_is_left_alone
 test_leaked_worktree_process_is_reaped
 test_leaked_tasktmp_process_is_reaped
 test_lsof_absent_reaps_tmux_process_group
-test_lsof_absent_reaps_only_bound_agent_pane
-test_lsof_absent_refuses_bound_pane_moved_after_preflight
 test_lsof_error_refuses_before_removal
 test_reused_pid_identity_is_not_force_killed
 test_exec_changed_process_is_still_reaped
@@ -5859,3 +5368,5 @@ test_process_spawned_during_grace_is_reaped_on_later_pass
 test_persistent_scan_refuses_after_bounded_retries
 test_process_exit_during_identity_lookup_does_not_refuse
 test_run_abort_precedes_process_reap_precedes_worktree_removal
+
+test_pane_metadata_does_not_change_window_teardown

@@ -119,18 +119,14 @@ FF_RESTART_WINDOWS=""
 FF_STEER_WINDOWS=""
 
 secondmate_agent_may_be_alive() {  # <id>
-  local id=$1 meta="$STATE/$1.meta" remote_host state=unreadable target target_rc=0
+  local id=$1 meta="$STATE/$1.meta" remote_host state=unreadable
   remote_host=$(fm_meta_get "$meta" remote_host)
   if [ -n "$remote_host" ]; then
     state=$("$SCRIPT_DIR/fm-on.sh" "$id" \
       fm-remote-secondmate-control.sh state "$id" < /dev/null 2>/dev/null) || state=unreadable
   elif fm_backend_validate_task_endpoint "$meta" "$id" >/dev/null 2>&1; then
-    target=$(fm_backend_io_target_of_meta "$meta" 2>/dev/null) || target_rc=$?
-    if [ "$target_rc" -eq 0 ]; then
-      state=$(fm_backend_agent_state "$FM_BACKEND_VALIDATED_BACKEND" "$target" 2>/dev/null) || state=unreadable
-    elif [ "$target_rc" -eq 2 ]; then
-      state=missing
-    fi
+    state=$(fm_backend_agent_state "$FM_BACKEND_VALIDATED_BACKEND" \
+      "$FM_BACKEND_VALIDATED_TARGET" 2>/dev/null) || state=unreadable
   fi
   case "$state" in
     dead|missing) return 1 ;;
