@@ -1392,6 +1392,7 @@ test_tick_skips_terminal_and_reuses_target_observation() {
     # Runtime overrides called indirectly by the pending-reply tick.
     # shellcheck disable=SC2329
     fm_backend_io_target_of_meta() { fm_backend_target_of_meta "$1"; }
+    # shellcheck disable=SC2329
     fm_backend_busy_state() {
       printf '%s\t%s\n' "$1" "$2" >> "$probe_log"
       printf 'busy'

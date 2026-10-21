@@ -48,7 +48,7 @@ Task input stays with the original agent pane when another pane is added to its 
 Relaunch preserves that pane.
 Cleanup keeps the task window as its lifecycle target, but first refuses a moved or unreadable valid binding before closing the endpoint or removing durable state.
 Older records without a pane binding retain baseline non-destructive input and observation through the task window's sole remaining pane, so a moved agent pane can leave those reads following a monitor until the record is retired and freshly spawned with a binding.
-Destructive and launch authority refuses an unbound record while its exact window survives or cannot be verified absent, while teardown may retire one after proven exact-window absence under the [unbound-task upgrade procedure](agent-control.md#upgrading-unbound-tmux-tasks).
+Control and automatic recovery refuse unbound records; teardown retains the pre-binding window-based behavior under the [unbound-task upgrade procedure](agent-control.md#upgrading-unbound-tmux-tasks).
 `fm_backend_io_target_of_meta` and `fm_backend_agent_authority_target_of_meta` in `bin/fm-backend.sh` own the pane-routing contracts, under which an ambiguous split or a stale binding refuses input ([issue #7539](https://github.com/kunchenguid/firstmate/issues/7539)).
 
 ### Agent liveness probe

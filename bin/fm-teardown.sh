@@ -626,7 +626,7 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
       # or agent-less before any cleanup decision is made.
       TEARDOWN_LEGACY_PENDING=1
     elif [ "$TEARDOWN_LEGACY_GEN_COUNT" = 0 ]; then
-      echo "error: task $ID's record has no spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - finish or retire the task from its own terminal, then pass --legacy-record after its recorded endpoint is confirmed dead or absent (unbound tmux records require the window to be closed)" >&2
+      echo "error: task $ID's record has no spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - finish or retire the task from its own terminal, then pass --legacy-record after its recorded endpoint is confirmed dead or absent" >&2
       exit 1
     else
       echo "error: task $ID's record has an unreadable spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - fix the record, then retry teardown" >&2
@@ -645,7 +645,7 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
         if [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
           TEARDOWN_WINDOWLESS=1
         elif [ "$LEGACY_RECORD_GIVEN" != 1 ]; then
-          echo "error: task $ID's record carries the legacy incarnation stamp $FM_BACKLOG_META_SPAWN_GEN left by an abandoned --legacy-record teardown, not an incarnation published by a spawn; refusing automatic teardown - finish or retire the task from its own terminal, then pass --legacy-record after its recorded endpoint is confirmed dead or absent (unbound tmux records require the window to be closed)" >&2
+          echo "error: task $ID's record carries the legacy incarnation stamp $FM_BACKLOG_META_SPAWN_GEN left by an abandoned --legacy-record teardown, not an incarnation published by a spawn; refusing automatic teardown - finish or retire the task from its own terminal, then pass --legacy-record after its recorded endpoint is confirmed dead or absent" >&2
           exit 1
         fi
         TEARDOWN_LEGACY_PENDING=1
@@ -1199,86 +1199,62 @@ MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
 BASE_BRANCH=$(grep '^base_branch=' "$META" | cut -d= -f2- || true)
 
-teardown_tmux_pane_binding_valid() {
-  local pane
-  pane=$(fm_backend_meta_exact_value "$1" tmux_pane_id) || return 1
-  case "$pane" in
-    %*) pane=${pane#%} ;;
-    *) return 1 ;;
-  esac
-  case "$pane" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-  return 0
-}
-
 TEARDOWN_TMUX_UNBOUND=0
-if [ "$BACKEND" = tmux ] && ! teardown_tmux_pane_binding_valid "$META"; then
+if [ "$BACKEND" = tmux ] && ! grep -q '^tmux_pane_id=' "$META"; then
   TEARDOWN_TMUX_UNBOUND=1
 fi
-teardown_require_tmux_endpoint_authority() {  # <meta> <task-id> <backend> <target> <legacy>
-  local meta=$1 task_id=$2 backend=$3 target=$4 legacy=$5 endpoint_status=0
+teardown_require_tmux_endpoint_authority() {  # <meta> <task-id> <backend> <target>
+  local meta=$1 task_id=$2 backend=$3 target=$4 endpoint_status=0
   [ "$backend" = tmux ] || return 0
-  if teardown_tmux_pane_binding_valid "$meta"; then
-    fm_backend_agent_authority_target_of_meta "$meta" >/dev/null \
-      || endpoint_status=$?
-    case "$endpoint_status" in
-      0|2) return 0 ;;
-      *)
-        echo "REFUSED: task $task_id's recorded agent pane is not verified in its exact recorded tmux window $target; teardown cannot safely close or remove this task. Nothing was changed." >&2
-        return 1
-        ;;
-    esac
-  fi
-  fm_backend_source tmux || return 1
-  fm_backend_tmux_window_id "${target%%:*}" "${target#*:}" >/dev/null \
+  # Pre-binding records retain the existing window-based teardown contract.
+  # A present but invalid binding is not a legacy record and must refuse.
+  grep -q '^tmux_pane_id=' "$meta" || return 0
+  fm_backend_agent_authority_target_of_meta "$meta" >/dev/null \
     || endpoint_status=$?
   case "$endpoint_status" in
-    2) return 0 ;;
+    0|2) return 0 ;;
     *)
-      echo "REFUSED: task $task_id has no recorded agent pane and its exact recorded tmux window $target is not proven absent; teardown cannot safely close or remove this task. Nothing was changed." >&2
-      if [ "$legacy" = 1 ]; then
-        echo "Finish or exit the task from its own terminal and preserve its work, close the exact recorded window, then retry --legacy-record teardown (docs/agent-control.md#upgrading-unbound-tmux-tasks)." >&2
-      else
-        echo "Finish or exit the task from its own terminal and preserve its work, close the exact recorded window, then retry teardown (docs/agent-control.md#upgrading-unbound-tmux-tasks)." >&2
-      fi
+      echo "REFUSED: task $task_id's recorded agent pane is not verified in its exact recorded tmux window $target; teardown cannot safely close or remove this task. Nothing was changed." >&2
       return 1 ;;
   esac
 }
 if [ "$TEARDOWN_WINDOWLESS" != 1 ] && [ "$KIND" != secondmate ]; then
   teardown_require_tmux_endpoint_authority \
-    "$META" "$ID" "$BACKEND" "$T" "$TEARDOWN_LEGACY_PENDING" || exit 1
+    "$META" "$ID" "$BACKEND" "$T" || exit 1
 fi
 
 # A record accepted as a legacy incarnation (no spawn_gen, and either
 # --legacy-record given or the record is windowless) may be torn down only
 # when its recorded endpoint is confidently gone or agent-less. Windowless
 # leftovers name no endpoint and are treated as missing. For a recorded
-# window, only a resolved agent pane classified dead or a resolver-proven
-# missing endpoint licenses that, and every ambiguous, moved, unreadable, or
-# unverified binding refuses while the record is still intact. Acceptance resolves the incarnation token
+# window, legacy unbound records keep the recovery-grade window classifier;
+# bound records require a resolved agent pane classified dead or a
+# resolver-proven missing endpoint. Ambiguous or unreadable state refuses
+# while the record is still intact. Acceptance resolves the incarnation token
 # here; the record itself is stamped only once every landed-work refusal has
 # passed, immediately before the close marker binds to it, so any refusal
 # leaves the record byte-identical.
 if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
   if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
     TEARDOWN_LEGACY_ENDPOINT=missing
-  elif [ "$TEARDOWN_TMUX_UNBOUND" = 1 ]; then
-    TEARDOWN_LEGACY_ENDPOINT=missing
   else
-    TEARDOWN_LEGACY_IO_STATUS=0
-    TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$META") \
-      || TEARDOWN_LEGACY_IO_STATUS=$?
-    case "$TEARDOWN_LEGACY_IO_STATUS" in
-      0) TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$TEARDOWN_LEGACY_IO_TARGET") ;;
-      2) TEARDOWN_LEGACY_ENDPOINT=missing ;;
-      *) TEARDOWN_LEGACY_ENDPOINT=unreadable ;;
-    esac
+    if [ "$TEARDOWN_TMUX_UNBOUND" = 1 ]; then
+      TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$T")
+    else
+      TEARDOWN_LEGACY_IO_STATUS=0
+      TEARDOWN_LEGACY_IO_TARGET=$(fm_backend_agent_authority_target_of_meta "$META") \
+        || TEARDOWN_LEGACY_IO_STATUS=$?
+      case "$TEARDOWN_LEGACY_IO_STATUS" in
+        0) TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$TEARDOWN_LEGACY_IO_TARGET") ;;
+        2) TEARDOWN_LEGACY_ENDPOINT=missing ;;
+        *) TEARDOWN_LEGACY_ENDPOINT=unreadable ;;
+      esac
+    fi
     case "$TEARDOWN_LEGACY_ENDPOINT" in
       dead|missing) ;;
       *)
         echo "REFUSED: task $ID's record predates spawn_gen and its recorded endpoint reads '$TEARDOWN_LEGACY_ENDPOINT', not confidently dead or agent-less; --legacy-record teardown is refused while an agent may still be bound to it. Nothing was changed." >&2
-        echo "Finish or exit the task from its own terminal and preserve its work; for unbound tmux records close the exact recorded window, then retry --legacy-record (docs/agent-control.md#upgrading-unbound-tmux-tasks)." >&2
+        echo "Finish or exit the task from its own terminal and preserve its work, then retry --legacy-record (docs/agent-control.md#upgrading-unbound-tmux-tasks)." >&2
         exit 1
         ;;
     esac
@@ -3316,7 +3292,7 @@ preflight_firstmate_home_tmux_endpoint_authority() {  # <home>
     child_backend=$FM_BACKEND_VALIDATED_BACKEND
     child_target=$FM_BACKEND_VALIDATED_TARGET
     teardown_require_tmux_endpoint_authority \
-      "$child_meta" "$child_id" "$child_backend" "$child_target" 0 || return 1
+      "$child_meta" "$child_id" "$child_backend" "$child_target" || return 1
     child_kind=$(meta_value "$child_meta" kind)
     [ -n "$child_kind" ] || child_kind=ship
     if [ "$child_kind" = secondmate ]; then
@@ -3554,7 +3530,7 @@ fi
 
 if [ "$KIND" = secondmate ]; then
   teardown_require_tmux_endpoint_authority \
-    "$META" "$ID" "$BACKEND" "$T" "$TEARDOWN_LEGACY_PENDING" || exit 1
+    "$META" "$ID" "$BACKEND" "$T" || exit 1
   preflight_firstmate_home_process_event_tree "$HOME_PATH" "secondmate home" || exit 1
 fi
 
