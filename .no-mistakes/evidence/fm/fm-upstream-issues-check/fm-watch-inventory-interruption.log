@@ -1,0 +1,6 @@
+ok - status_span_has_actionable: benign absorbed, captain events surfaced, classified events not re-fired
+ok - an actionable event is not hidden by later routine appends, and is named as itself
+ok - span classification retires closed decisions and surfaces rejected transitions for reconciliation
+ok - span classification from an offset keeps closed decisions closed and live ones live
+ok - a malformed seen signature causes the whole status log to be classified
+ok - TERM and HUP stop the watcher across pane inventory and run cleanup
