@@ -1,0 +1,44 @@
+Live pane-routing evidence
+Date: 2026-10-23
+Target: 241494e26eb6b39d80aef5567332af8d77b6bc72
+Product: Firstmate fm-send.sh with Codex CLI 0.160.1 and tmux 3.2a
+
+Runbook-exact fixture
+- Disposable FM_HOME created by bin/fm-lab-home.sh.
+- Private socket at $LAB/tmux, named fm-lab, with a non-zero 180x48 grid.
+- Recorded task window: primary:1
+- Recorded agent pane: %0 (Codex)
+- Focused monitor pane: %1
+
+Before delivery
+WINDOW=primary:1
+MONITOR=%1
+ACTIVE=%1
+monitor capture: MONITOR_SENTINEL
+
+Delivery
+FM_HOME=<lab> bash bin/fm-send.sh livepane 'Reply with LIVE_PANE_OK only; do not run tools.'
+SEND_RC=0
+
+Agent pane after delivery
+: Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'livepane.inbox'
+  steering inbox, read and act on each in numeric order, then mv each into its handled/.
+
+Focused monitor after delivery
+MONITOR_SENTINEL
+ACTIVE_PANE=%1
+
+The runbook-exact lab was torn down in the same command.
+
+Completion confirmation from the immediately preceding isolated live run
+
+Agent terminal result
+LIVE_PANE_OK
+INBOX_PENDING=no
+
+Focused monitor after completion
+MONITOR_SENTINEL
+ACTIVE_PANE=%2
+
+Result
+The recorded Codex pane received and handled the durable steer while the other split stayed focused and unchanged.

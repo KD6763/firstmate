@@ -1,0 +1,36 @@
+Targeted command
+bash tests/fm-backend-tmux-smoke.test.sh
+
+Relevant product-level results on the private real tmux server
+ok - real tmux: task doorbell, keys and guarding reads stay on the recorded pane with the monitor active
+ok - real tmux: re-rings and a focus change between typing and Enter preserve the agent pane
+ok - real tmux: ordinary watcher delivery ignores a focused idle-shell monitor
+ok - real tmux: explicit watcher retry ignores a focused idle-shell monitor
+ok - real tmux: Enter retries and the pending-composer guard use the bound pane despite focus changes
+ok - real tmux: unbound split windows retain active-pane I/O
+ok - real tmux: stale triage reads the recorded agent with the monitor active
+ok - real tmux: mismatched, duplicate and stale pane bindings fail closed
+ok - real tmux: lifecycle cleanup retains the whole-window target
+ok - real tmux: moved, absent and unreadable missing-window bindings remain distinct
+ok - real tmux: recovery retains window-based behavior for bound and unbound records
+ok - real tmux: whole-server absence remains a proven missing endpoint
+
+Command exit: 0
+
+Focused spawn and relaunch commands
+bash tests/fm-spawn-worktree-settle.test.sh
+bash tests/fm-control-relaunch.test.sh
+
+Relevant results
+ok - a single transient stale pane_current_path read is not accepted as the worktree
+ok - fm-control relaunch: pane fields survive without adding lifecycle refusals or adoption
+
+Both commands exited 0.
+
+Focused secondmate drain command
+bash tests/fm-wake-queue.test.sh
+
+Relevant result
+ok - a proven-idle leftover row is rung so the child home can drain without a parent alarm
+
+The assertion verified the drain guard, capture, and send targets were the recorded pane, never the focused monitor. Command exit: 0.
