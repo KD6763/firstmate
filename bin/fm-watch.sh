@@ -2944,10 +2944,12 @@ fm_capture_output_cleanup() {
   FM_CAPTURE_OUTPUT=
 }
 
-# watcher_capture: fm_backend_capture into WATCHER_CAPTURE with its exit status.
-# The read runs as a waited background process group rather than inside $(...),
-# so a stop is not held for a blocked read (watcher_stop_signals). The group is
-# recorded like a check's, so watcher_cleanup stops a read still in flight.
+# watcher_capture: resolve metadata-bound task I/O, then capture the pane or read
+# its composer state into WATCHER_CAPTURE with the operation's exit status.
+# The complete read runs as a waited background process group rather than inside
+# $(...), so a stop is not held by blocked resolution or capture
+# (watcher_stop_signals). The group is recorded like a check's, so
+# watcher_cleanup stops a read still in flight.
 watcher_capture_process() {  # <backend> <target> <lines> [expected-label] [capture|composer]
   local meta window target=$2 window_rc
   if [ "$1" = tmux ]; then

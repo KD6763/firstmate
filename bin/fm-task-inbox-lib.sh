@@ -335,9 +335,9 @@ fm_task_inbox_doorbell_line() {  # <record-path>
     "$quoted"
 }
 
-# Ring the doorbell, best-effort: one endpoint-liveness pre-check, one advisory
-# composer pre-check, then the backend's submit machinery with a minimal retry
-# budget, verdict discarded.
+# Ring the doorbell, best-effort: validate the lifecycle and recorded delivery
+# target as applicable, run one advisory composer pre-check, then use the
+# backend's submit machinery with a minimal retry budget, verdict discarded.
 # Returns 0 rang, 1 skipped because the composer PROVENLY holds pending text
 # other than our own doorbell (the watcher re-rings later), 2 the backend send
 # failed or its recorded pane could not be verified, 3 skipped because the
