@@ -1,0 +1,12 @@
+command=source bin/fm-watch.sh; event_wait_or_sleep; event_wait_or_sleep
+helper_exit=0 capability_schema_calls=1 bounded_wait_children=2 confirmed_children=2
+parent_state:
+parent_pid=1058429 before_key= before_ok=0
+after_first_key=herdr:eventlab after_first_ok=1
+after_second_key=herdr:eventlab after_second_ok=1
+capability_calls:
+pid=1058576 parent=1058575 confirmed=unset args=status --json 
+pid=1058584 parent=1058582 confirmed=unset args=api schema --json 
+reader_children:
+reader_pid=1058611 parent=1058594 confirmed=1 socket=/fixture/eventlab.sock timeout=1 panes=pane-1 
+reader_pid=1058737 parent=1058717 confirmed=1 socket=/fixture/eventlab.sock timeout=1 panes=pane-1 

@@ -1,0 +1,4 @@
+command=source bin/fm-watch.sh; watcher_waited waited_contract_child
+helper_exit=0
+parent_pid=1058284 child_pid=1058410 watcher_result=waited-stdout exact_status=7
+preserved_stderr=waited-stderr

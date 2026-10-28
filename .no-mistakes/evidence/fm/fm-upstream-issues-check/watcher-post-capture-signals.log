@@ -1,0 +1,28 @@
+case=term-post-capture signal=TERM phase=post-capture
+command=FM_HOME=/home/frontier/.no-mistakes/worktrees/4930732778b1/01M61Q2T9YMNGHTXP24FKKXECJ/.no-mistakes/live-watcher-validation/run/term-post-capture-home FM_STATE_OVERRIDE=/home/frontier/.no-mistakes/worktrees/4930732778b1/01M61Q2T9YMNGHTXP24FKKXECJ/.no-mistakes/live-watcher-validation/run/term-post-capture-home/state PATH=/home/frontier/.no-mistakes/worktrees/4930732778b1/01M61Q2T9YMNGHTXP24FKKXECJ/.no-mistakes/live-watcher-validation/bin:/home/frontier/.nvm/versions/node/v22.22.2/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/lib/dotnet/dotnet:/home/frontier/.local/bin:/home/frontier/.codex/tmp/arg0/codex-arg0W76KIe:/home/frontier/.nvm/versions/node/v22.22.2/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/lib/dotnet/dotnet:/home/frontier/.local/bin:/home/frontier/google-cloud-sdk/bin:/home/frontier/.nvm/versions/node/v22.22.2/bin:/home/frontier/miniconda3/bin:/home/frontier/miniconda3/condabin:/home/frontier/.local/bin:/home/frontier/go/bin:/home/frontier/.cargo/bin:/home/frontier/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:/snap/bin:/home/frontier/.dotnet/tools:/usr/local/go/bin:/home/frontier/go/bin bin/fm-watch.sh
+private_tmux_socket_name=fm-live-1053298 session=watcherlab window=agent pane=%0 pane_pid=1053334
+watcher_pid=1056332 wrapper_pid=1057142 sleep_pid=1057144 watcher_exit=143
+blocked_phase=post-capture block_ns=1793207806664195596 signal_start_ns=1793207806418986288 stopped_ns=1793207806749466315
+captured_before_block=yes wrapper_alive_after=no sleep_alive_after=no singleton_lock_after=absent recorded_pane_after=alive
+proxy_excerpt:
+proxy_pid=1056791 args=list-windows -t =watcherlab -F \#\{window_name\} 
+proxy_pid=1056914 args=list-windows -t =watcherlab -F \#\{window_name\} 
+proxy_pid=1056926 args=capture-pane -p -t watcherlab:agent -S -40 
+proxy_pid=1057135 args=list-windows -t =watcherlab -F \#\{window_id\}\|#\{window_index\}\|#\{window_name\} 
+proxy_pid=1057142 args=list-panes -t @0 -F \#\{pane_id\} 
+watcher_excerpt:
+---
+case=hup-post-capture signal=HUP phase=post-capture
+command=FM_HOME=/home/frontier/.no-mistakes/worktrees/4930732778b1/01M61Q2T9YMNGHTXP24FKKXECJ/.no-mistakes/live-watcher-validation/run/hup-post-capture-home FM_STATE_OVERRIDE=/home/frontier/.no-mistakes/worktrees/4930732778b1/01M61Q2T9YMNGHTXP24FKKXECJ/.no-mistakes/live-watcher-validation/run/hup-post-capture-home/state PATH=/home/frontier/.no-mistakes/worktrees/4930732778b1/01M61Q2T9YMNGHTXP24FKKXECJ/.no-mistakes/live-watcher-validation/bin:/home/frontier/.nvm/versions/node/v22.22.2/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/lib/dotnet/dotnet:/home/frontier/.local/bin:/home/frontier/.codex/tmp/arg0/codex-arg0W76KIe:/home/frontier/.nvm/versions/node/v22.22.2/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/lib/dotnet/dotnet:/home/frontier/.local/bin:/home/frontier/google-cloud-sdk/bin:/home/frontier/.nvm/versions/node/v22.22.2/bin:/home/frontier/miniconda3/bin:/home/frontier/miniconda3/condabin:/home/frontier/.local/bin:/home/frontier/go/bin:/home/frontier/.cargo/bin:/home/frontier/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:/snap/bin:/home/frontier/.dotnet/tools:/usr/local/go/bin:/home/frontier/go/bin bin/fm-watch.sh
+private_tmux_socket_name=fm-live-1053298 session=watcherlab window=agent pane=%0 pane_pid=1053334
+watcher_pid=1057270 wrapper_pid=1058135 sleep_pid=1058138 watcher_exit=129
+blocked_phase=post-capture block_ns=1793207807227183709 signal_start_ns=1793207806983337148 stopped_ns=1793207807312460617
+captured_before_block=yes wrapper_alive_after=no sleep_alive_after=no singleton_lock_after=absent recorded_pane_after=alive
+proxy_excerpt:
+proxy_pid=1057753 args=list-windows -t =watcherlab -F \#\{window_name\} 
+proxy_pid=1057896 args=list-windows -t =watcherlab -F \#\{window_name\} 
+proxy_pid=1057915 args=capture-pane -p -t watcherlab:agent -S -40 
+proxy_pid=1058133 args=list-windows -t =watcherlab -F \#\{window_id\}\|#\{window_index\}\|#\{window_name\} 
+proxy_pid=1058135 args=list-panes -t @0 -F \#\{pane_id\} 
+watcher_excerpt:
+---
