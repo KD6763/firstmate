@@ -3009,72 +3009,116 @@ test_wedge_escalation_resets_when_pane_becomes_active() {
 # cleanup at any point of a poll. A TERM trap body cannot promise that: bash
 # defers it until the blocked command returns, and bash 5.2 can drop it outright
 # when it is pending as a command substitution is parsed, which left CI watchers
-# polling after reap until the job timed out. The pane inventory here blocks
-# before capture, so only a stop honored across the complete read stops the
-# watcher inside the bound; the released lock and acknowledgeable stop record
-# prove its cleanup still ran.
-test_term_stops_a_watcher_blocked_inside_a_poll() {
-  local signal name dir state fakebin out window sig pid i rc inventory_pid sleep_pid
-  for signal in TERM HUP; do
-    name=$(printf '%s' "$signal" | tr '[:upper:]' '[:lower:]')
-    dir=$(make_case "$name-blocked-inventory"); state="$dir/state"; fakebin="$dir/fakebin"
-    out="$dir/watch.out"; window="test:fm-blocked-inventory"
-    mv "$fakebin/tmux" "$fakebin/tmux-base"
-    cat > "$fakebin/tmux" <<'SH'
+# polling after reap until the job timed out. A bounded exit, released lock,
+# and acknowledgeable stop record prove the watcher still ran its cleanup.
+# Block capture-time inventory, post-capture busy resolution, or the rendered
+# fallback's second capture. Only the latter two expose a read that escaped the
+# original capture group. Keep the blocking shell and its child observable so a
+# prompt watcher exit that leaks the read process cannot pass.
+blocked_watcher_read_stops() {  # <TERM|HUP> <inventory|busy-inventory|busy-capture>
+  local signal=$1 phase=$2 name dir state fakebin out window sig pid i rc inventory_pid sleep_pid
+  name=$(printf '%s' "$signal-$phase" | tr '[:upper:]' '[:lower:]')
+  dir=$(make_case "$name"); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; window="test:fm-blocked-read"
+  mv "$fakebin/tmux" "$fakebin/tmux-base"
+  cat > "$fakebin/tmux" <<'TMUX'
 #!/usr/bin/env bash
 set -u
-if [ "${1:-}" = list-panes ]; then
+block_read() {
   sleep 30 &
   child=$!
-  printf '%s %s\n' "$$" "$child" > "$FM_FAKE_TMUX_INVENTORY_BLOCKED"
+  printf '%s %s\n' "$$" "$child" > "$FM_TEST_BLOCK_DIR/blocked"
   wait "$child"
   exit $?
-fi
+}
+case "${1:-}" in
+  list-panes)
+    if [ "$FM_TEST_BLOCK_PHASE" = inventory ] \
+      || { [ "$FM_TEST_BLOCK_PHASE" = busy-inventory ] && [ -e "$FM_TEST_BLOCK_DIR/captured" ]; }; then
+      block_read
+    fi
+    ;;
+  capture-pane)
+    if [ "$FM_TEST_BLOCK_PHASE" = busy-capture ] && [ -e "$FM_TEST_BLOCK_DIR/captured" ]; then
+      block_read
+    fi
+    "$(dirname "$0")/tmux-base" "$@" || exit $?
+    : > "$FM_TEST_BLOCK_DIR/captured"
+    exit 0
+    ;;
+esac
 exec "$(dirname "$0")/tmux-base" "$@"
-SH
-    chmod +x "$fakebin/tmux"
-    printf 'window=%s\nkind=ship\n' "$window" > "$state/blocked.meta"
-    printf 'working: implementing\n' > "$state/blocked.status"
-    sig=$(seen_sig "$state/blocked.status"); printf '%s' "$sig" > "$state/.seen-blocked_status"
-    PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" \
-      FM_FAKE_TMUX_INVENTORY_BLOCKED="$dir/inventory-blocked" \
-      FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 \
-      FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
-    pid=$!
-    i=0
-    while [ ! -e "$state/.last-watcher-beat" ] && [ "$i" -lt 300 ]; do
-      sleep 0.1
-      i=$((i + 1))
-    done
-    if [ ! -e "$state/.last-watcher-beat" ] || ! is_live_non_zombie "$pid"; then
-      reap "$pid"
-      fail "the watcher did not finish startup under $signal: $(cat "$out")"
-    fi
-    printf 'window=%s\nkind=ship\ntmux_pane_id=%%1\n' "$window" > "$state/blocked.meta"
-    i=0
-    while [ ! -s "$dir/inventory-blocked" ] && [ "$i" -lt 300 ]; do
-      sleep 0.1
-      i=$((i + 1))
-    done
-    if [ ! -s "$dir/inventory-blocked" ] || ! is_live_non_zombie "$pid"; then
-      reap "$pid"
-      fail "the watcher never blocked inside its pane inventory under $signal: $(cat "$out")"
-    fi
-    read -r inventory_pid sleep_pid < "$dir/inventory-blocked"
-    kill -s "$signal" "$pid" 2>/dev/null || true
-    wait_for_exit "$pid" 100
-    rc=$?
-    [ "$rc" -ne 124 ] || fail "$signal did not stop a watcher blocked inside pane inventory"
-    ! kill -0 "$inventory_pid" 2>/dev/null \
-      || fail "$signal left the pane-inventory shell running"
-    ! kill -0 "$sleep_pid" 2>/dev/null \
-      || fail "$signal left the pane-inventory child running"
-    [ ! -e "$state/.watch.lock" ] \
-      || fail "a watcher stopped by $signal kept its singleton lock, so its cleanup did not run"
-    ack_stopped_cycle "$state" \
-      || fail "could not acknowledge the $signal stop of a watcher blocked inside pane inventory"
+TMUX
+  chmod +x "$fakebin/tmux"
+  printf 'window=%s\nkind=ship\nharness=grok\n' "$window" > "$state/blocked.meta"
+  printf 'working: implementing\n' > "$state/blocked.status"
+  sig=$(seen_sig "$state/blocked.status"); printf '%s' "$sig" > "$state/.seen-blocked_status"
+  # An empty first capture makes Grok take the optional rendered fallback read.
+  : > "$dir/pane.txt"
+  [ "$phase" = busy-capture ] || printf 'idle pane\n' > "$dir/pane.txt"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$dir/pane.txt" \
+    FM_TEST_BLOCK_DIR="$dir" FM_TEST_BLOCK_PHASE="$phase" \
+    FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  i=0
+  while [ ! -e "$state/.last-watcher-beat" ] && [ "$i" -lt 300 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if [ ! -e "$state/.last-watcher-beat" ] || ! is_live_non_zombie "$pid"; then
+    reap "$pid"
+    fail "the watcher did not finish startup for $signal/$phase: $(cat "$out")"
+  fi
+  printf 'window=%s\nkind=ship\nharness=grok\ntmux_pane_id=%%1\n' "$window" > "$state/blocked.meta"
+  i=0
+  while [ ! -s "$dir/blocked" ] && [ "$i" -lt 300 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if [ ! -s "$dir/blocked" ] || ! is_live_non_zombie "$pid"; then
+    reap "$pid"
+    fail "the watcher never blocked in $phase under $signal: $(cat "$out")"
+  fi
+  if [ "$phase" != inventory ] && [ ! -e "$dir/captured" ]; then
+    reap "$pid"
+    fail "the $phase read blocked before the first capture finished"
+  fi
+  read -r inventory_pid sleep_pid < "$dir/blocked"
+  kill -s "$signal" "$pid" 2>/dev/null || true
+  wait_for_exit "$pid" 100
+  rc=$?
+  if [ "$rc" -eq 124 ]; then
+    reap "$pid"
+    kill "$inventory_pid" "$sleep_pid" 2>/dev/null || true
+    fail "$signal did not stop a watcher blocked in $phase within 10s"
+  fi
+  if kill -0 "$inventory_pid" 2>/dev/null || kill -0 "$sleep_pid" 2>/dev/null; then
+    kill "$inventory_pid" "$sleep_pid" 2>/dev/null || true
+    fail "$signal left a $phase read process running"
+  fi
+  [ ! -e "$state/.watch.lock" ] \
+    || fail "a watcher stopped by $signal in $phase kept its singleton lock"
+  ack_stopped_cycle "$state" \
+    || fail "could not acknowledge the $signal stop of a watcher blocked in $phase"
+}
+
+test_term_stops_a_watcher_blocked_inside_a_poll() {
+  local signal
+  for signal in TERM HUP; do
+    blocked_watcher_read_stops "$signal" inventory
   done
   pass "TERM and HUP stop the watcher across pane inventory and run cleanup"
+}
+
+test_stop_signals_interrupt_post_capture_busy_reads() {
+  local signal phase
+  for signal in TERM HUP; do
+    for phase in busy-inventory busy-capture; do
+      blocked_watcher_read_stops "$signal" "$phase"
+    done
+  done
+  pass "TERM and HUP stop post-capture busy inventory and fallback capture, reap their children, and release the lock"
 }
 
 # --- held downtime-marker lock must not wedge a TERM'd watcher -------------
@@ -4957,10 +5001,12 @@ test_closed_exit_picker_drops_saved_dialog_name() {
 }
 
 # CI's stock macOS Bash lane sets FM_TEST_STOCK_BASH=1 to run just the bash-3.2
-# churn-deferral regression. The rest of this file is not a 3.2 snapshot suite.
+# churn-deferral and blocked-read regressions. The rest is not a 3.2 snapshot suite.
 # Adding another stock-bash case means adding it to this list, not to ci.yml.
 if [ -n "${FM_TEST_STOCK_BASH:-}" ]; then
-  fm_test_run test_turn_ended_churn_existing_marker_absorbed
+  fm_test_run test_turn_ended_churn_existing_marker_absorbed \
+    test_term_stops_a_watcher_blocked_inside_a_poll \
+    test_stop_signals_interrupt_post_capture_busy_reads
   exit 0
 fi
 if [ -n "${FM_TEST_ONLY:-}" ]; then
@@ -5050,6 +5096,7 @@ fm_test_run \
   test_second_death_after_a_same_window_relaunch_reports_in_full \
   test_identical_dead_display_of_a_successor_still_reports \
   test_term_stops_a_watcher_blocked_inside_a_poll \
+  test_stop_signals_interrupt_post_capture_busy_reads \
   test_term_stops_a_watcher_whose_cleanup_marker_lock_is_held \
   test_cleanup_marker_lock_bound_is_decimal_with_zero_default \
   test_busy_pane_below_turn_age_bound_is_absorbed \

@@ -471,10 +471,12 @@ window_is_busy() {  # <window> <tail40>
   task=$(window_to_task "$w" "$STATE")
   meta="$STATE/$task.meta"
   if [ -n "$task" ] && [ -f "$meta" ]; then
-    verdict=$(fm_busy_classify_meta "$meta" "$task" "$STATE" "$tail40")
+    watcher_waited fm_busy_classify_meta "$meta" "$task" "$STATE" "$tail40" || true
+    verdict=$WATCHER_RESULT
   else
-    verdict=$(fm_busy_classify "$(window_backend "$w")" "$w" "$(window_harness "$w")" \
-      "${task:-unknown}" "$STATE" "$tail40")
+    watcher_waited fm_busy_classify "$(window_backend "$w")" "$w" "$(window_harness "$w")" \
+      "${task:-unknown}" "$STATE" "$tail40" || true
+    verdict=$WATCHER_RESULT
   fi
   case "$verdict" in
     busy\ *) return 0 ;;
@@ -558,9 +560,11 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # native uncertainty as busy (fm_busy_is_busy), so a doorbell waits for proven
 # idle; pane staleness elsewhere still needs busy proof.
 inbox_steer_busy() {  # <window> <backend> <task> <tail40>
-  local w=$1 backend=$2 task=$3 tail40=$4
+  local w=$1 backend=$2 task=$3 tail40=$4 rc=0
   if [ "$backend" = t3code ]; then
-    fm_busy_is_busy t3code "$w" "$(window_harness "$w")" "$task" "$STATE" "$tail40"
+    watcher_waited fm_busy_is_busy t3code "$w" "$(window_harness "$w")" "$task" "$STATE" "$tail40" || rc=$?
+    # A failed protected read is uncertainty, never permission to type into T3.
+    [ "$rc" -ne 1 ]
   else
     window_is_busy "$w" "$tail40"
   fi
@@ -600,10 +604,12 @@ inbox_steer_check() {  # <window> <task>
       agent_state=unreadable
     else
       io_target=$(fm_meta_get "$meta" tmux_pane_id)
-      agent_state=$(fm_backend_agent_state "$backend" "$io_target" 2>/dev/null || true)
+      watcher_waited fm_backend_agent_state "$backend" "$io_target" 2>/dev/null || true
+      agent_state=$WATCHER_RESULT
     fi
   else
-    agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+    watcher_waited fm_backend_agent_state "$backend" "$w" 2>/dev/null || true
+    agent_state=$WATCHER_RESULT
   fi
   case "$agent_state" in
     dead|missing)
@@ -639,7 +645,7 @@ inbox_steer_check() {  # <window> <task>
   case "$verb" in
     ring)
       ring_rc=0
-      fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" || ring_rc=$?
+      watcher_waited fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" || ring_rc=$?
       if [ "$ring_rc" -eq 3 ]; then
         inbox_steer_escalate_unavailable "$w" "$task" "$rec"
         return 0
@@ -659,7 +665,7 @@ inbox_steer_check() {  # <window> <task>
       ;;
     retry)
       ring_rc=0
-      fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" || ring_rc=$?
+      watcher_waited fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" || ring_rc=$?
       if ! fm_task_inbox_clear_retry "$STATE" "$task" "$rec" && [ -f "$rec" ]; then
         reason="stale: $w (steering-inbox retry mark unremovable: ${rec%/*}/.retry-ring cannot be removed, so $rec would ring on every poll - inspect the inbox directory)"
         fm_wake_append stale "$w" "$reason" || exit 1
@@ -812,7 +818,7 @@ signal_turnend_panes_churned() {  # <file> ...
   done
   for ((i = 0; i < ${#signal_tasks[@]}; i++)); do
     task=${signal_tasks[$i]}
-    crew_is_provably_working "$task" && continue
+    watcher_waited crew_is_provably_working "$task" && continue
     task_index=${signal_indexes[$i]}
     churn_indexes+=("$task_index")
   done
@@ -963,7 +969,8 @@ secondmate_busy_class() {  # <window>
   fi
   watcher_capture "$(window_backend "$w")" "$w" 40 "$(window_label "$w")" || return 0
   tail40=$WATCHER_CAPTURE
-  verdict=$(fm_busy_classify_meta "$meta" "$task" "$STATE" "$tail40")
+  watcher_waited fm_busy_classify_meta "$meta" "$task" "$STATE" "$tail40" || return 0
+  verdict=$WATCHER_RESULT
   SECONDMATE_BUSY_CLASS=${verdict%% *}
 }
 
@@ -983,7 +990,8 @@ secondmate_idle_ring_safe() {  # <window>
   if [ "$backend" = tmux ] && [ -f "$meta" ] && grep -q '^tmux_pane_id=' "$meta"; then
     target=$(fm_meta_get "$meta" tmux_pane_id)
   fi
-  agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)
+  watcher_waited fm_backend_agent_state "$backend" "$target" 2>/dev/null || true
+  agent_state=$WATCHER_RESULT
   [ "$agent_state" = alive ] || return 1
   watcher_capture "$backend" "$w" 0 "$(window_label "$w")" composer || return 1
   cstate=$WATCHER_CAPTURE
@@ -1007,7 +1015,7 @@ secondmate_ring_to_drain() {  # <task> <window>
   rec=$(fm_task_inbox_write "$STATE" "$task" \
     "${FM_FROMFIRST_MARK}delivery=${delivery_id} Drain pending rows in this home's wake queue, then resume idle supervision." \
     fire-and-forget) || return 1
-  fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")"
+  watcher_waited fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")"
 }
 
 # Surface one durable parent check when the foreign queue's drain position has
@@ -1212,7 +1220,10 @@ secondmate_liveness_tick() {
       failed=1
     fi
   done
-  [ -z "$first_reason" ] || wake "$first_reason"
+  if [ -n "$first_reason" ]; then
+    printf '%s' "$first_reason"
+    return 0
+  fi
   [ "$failed" -eq 0 ]
 }
 
@@ -1802,7 +1813,8 @@ clear_write_tracking() {  # <window-key>
 wedge_defer_validating() {  # <window> <since-file> <triage-label> <idle-age> <task>
   local win=$1 since_file=$2 label=$3 age=$4 task=$5 verdict run step key vsf vage
   [ -e "$CONFIG/wedge-defer-validating" ] || return 1
-  verdict=$(crew_run_is_validating "$task") || return 1
+  watcher_waited crew_run_is_validating "$task" || return 1
+  verdict=$WATCHER_RESULT
   run=${verdict%% *}; step=${verdict#* }
   key=$(window_key "$win")
   vsf="$STATE/.validating-since-$key"
@@ -1853,7 +1865,8 @@ wedge_dead_record() {  # <window> <since-file> <triage-label> <idle-age> <pane-h
   local win=$1 since_file=$2 label=$3 age=$4 hash=$5 task=$6 key marker agent_state detail reason gen id
   key=$(window_key "$win")
   marker="$STATE/.dead-reported-$key"
-  agent_state=$(fm_backend_agent_state "$(window_backend "$win")" "$win" 2>/dev/null) || agent_state=unreadable
+  watcher_waited fm_backend_agent_state "$(window_backend "$win")" "$win" 2>/dev/null || WATCHER_RESULT=unreadable
+  agent_state=$WATCHER_RESULT
   case "$agent_state" in
     dead) detail='the endpoint is still there with no agent running in it' ;;
     missing) detail='the recorded endpoint is gone' ;;
@@ -2019,7 +2032,7 @@ wedge_defer_guard() {  # <window> <since-file> <triage-label> <idle-age> <guard-
 # missing endpoint is never deferred by a guard, and a home without
 # config/wedge-evidence-guards never reaches it.
 wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-file> <task> <pane-hash> [dialog-name]
-  local win=$1 since_file=$2 label=$3 escalation_file=$4 task=$5 hash=$6 dialog=${7-} since age n prev reason evidence guard guard_note
+  local win=$1 since_file=$2 label=$3 escalation_file=$4 task=$5 hash=$6 dialog=${7-} since age n prev reason guard guard_note
   local _wkey _wrollback_sentinel _wrb_ts _wrb_cap_reason _wrb_cap_status _wrb_rm_status
   local _wrb_since _wrb_now _wrb_age _wrb_cap_ts _wrb_gate
   _wkey=$(window_key "$win")
@@ -2115,8 +2128,8 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
             || { fm_epoch_seconds_to _wrb_now; printf '%s\n' "$_wrb_now" > "$since_file"; }
           return 0
         fi
-        if evidence=$(wedge_wait_evidence "$task") &&
-           wedge_defer_wait "$win" "$since_file" "$label" "$age" "$evidence"; then
+        if watcher_waited wedge_wait_evidence "$task" &&
+           wedge_defer_wait "$win" "$since_file" "$label" "$age" "$WATCHER_RESULT"; then
           return 0
         fi
         if crew_worktree_written_since "$task" "$STATE" "$since_file"; then
@@ -2272,8 +2285,10 @@ wedge_defer_t3code_running() {  # <window> <since-file> <triage-label> <idle-age
   local win=$1 since_file=$2 label=$3 age=$4 turn_age
   [ "$(window_backend "$win")" = t3code ] || return 1
   fm_backend_source t3code || return 1
-  [ "$(fm_backend_t3code_probe "$win")" = running ] || return 1
-  turn_age=$(fm_backend_t3code_turn_age "$win") || return 1
+  watcher_waited fm_backend_t3code_probe "$win" || return 1
+  [ "$WATCHER_RESULT" = running ] || return 1
+  watcher_waited fm_backend_t3code_turn_age "$win" || return 1
+  turn_age=$WATCHER_RESULT
   [ "$turn_age" -lt "$BUSY_TURN_MAX_SECS" ] || return 1
   clear_write_tracking "$(window_key "$win")"
   date +%s > "$since_file"
@@ -2744,13 +2759,16 @@ unknown_alive_stale_bound() {  # <window> <task>
   [ -n "$task" ] || return 1
   meta="$STATE/$task.meta"
   if [ -f "$meta" ]; then
-    verdict=$(fm_busy_classify_meta "$meta" "$task" "$STATE")
+    watcher_waited fm_busy_classify_meta "$meta" "$task" "$STATE" || true
+    verdict=$WATCHER_RESULT
   else
-    verdict=$(fm_busy_classify "$(window_backend "$win")" "$win" "$(window_harness "$win")" \
-      "$task" "$STATE")
+    watcher_waited fm_busy_classify "$(window_backend "$win")" "$win" "$(window_harness "$win")" \
+      "$task" "$STATE" || true
+    verdict=$WATCHER_RESULT
   fi
   [ "${verdict%% *}" = unknown ] || return 1
-  agent_alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || agent_alive=unknown
+  watcher_waited fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null || WATCHER_RESULT=unknown
+  agent_alive=$WATCHER_RESULT
   [ "$agent_alive" = alive ] || return 1
   unknown_alive_progressing "$task" || return 1
   STALE_WAIT_DECLARATION="unknown-alive:$task:$(window_backend "$win"):$win:$verdict"
@@ -2989,6 +3007,7 @@ run_check_capture() {
 
 FM_CAPTURE_OUTPUT=
 WATCHER_CAPTURE=
+WATCHER_RESULT=
 
 fm_capture_output_cleanup() {
   [ -z "$FM_CAPTURE_OUTPUT" ] || rm -f -- "$FM_CAPTURE_OUTPUT"
@@ -3021,17 +3040,20 @@ watcher_capture_process() {  # <backend> <target> <lines> [expected-label] [capt
   esac
 }
 
-# watcher_waited: <command...> into WATCHER_CAPTURE with its exit status. The
+# watcher_waited: <command...> into WATCHER_RESULT with its exit status. The
 # command runs as a waited background process group rather than inside $(...),
-# so a stop is not held for a blocked read (watcher_stop_signals): pane reads
-# (watcher_capture) and the event wait that spans a whole POLL
-# (event_wait_or_sleep) both run here. The group is recorded like a check's, so
-# watcher_cleanup stops one still in flight. Its own setup failures return 2,
+# so a stop is not held for a blocked read (watcher_stop_signals). Every live
+# endpoint read reached by a poll belongs here, including busy classification,
+# liveness, crew-state helpers, inbox delivery checks, and the event wait.
+# Call directly in the watcher shell, never inside $(...) or another waited
+# command: cleanup must own the group in the shell receiving the stop signal.
+# The group is recorded like a check's, so watcher_cleanup stops one still in
+# flight. Its own setup failures return 2,
 # which the event wait reads as an unusable event path (sleep the budget).
 watcher_waited() {  # <command...>
   local rc pgid
   fm_capture_output_cleanup
-  WATCHER_CAPTURE=
+  WATCHER_RESULT=
   FM_CAPTURE_OUTPUT=$(mktemp "$STATE/.fm-capture-output.XXXXXX") || return 2
   FM_CHECK_SIGNAL_PENDING=
   trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
@@ -3055,14 +3077,18 @@ watcher_waited() {  # <command...>
   rc=$?
   FM_ACTIVE_CHECK_PID=
   fm_active_check_stop || { fm_capture_output_cleanup; return 2; }
-  WATCHER_CAPTURE=$(cat "$FM_CAPTURE_OUTPUT" 2>/dev/null || true)
+  WATCHER_RESULT=$(cat "$FM_CAPTURE_OUTPUT" 2>/dev/null || true)
   fm_capture_output_cleanup
   return "$rc"
 }
 
 # watcher_capture: metadata-bound capture or composer read through watcher_waited.
+# Keep its output separate so later probes cannot overwrite the captured tail.
 watcher_capture() {  # <backend> <target> <lines> [expected-label]
-  watcher_waited watcher_capture_process "$@"
+  local rc=0
+  watcher_waited watcher_capture_process "$@" || rc=$?
+  WATCHER_CAPTURE=$WATCHER_RESULT
+  return "$rc"
 }
 
 # The event wait's scratch directory, given to it as TMPDIR. A stop kills the
@@ -3237,7 +3263,7 @@ event_wait_or_sleep() {
   # read); re-probed only when the backend/session key changes.
   if [ "$_event_cap_key" != "$first_backend:$first_session" ]; then
     _event_cap_key="$first_backend:$first_session"
-    if fm_backend_events_capable "$first_backend" "$first_session"; then
+    if watcher_waited fm_backend_events_capable "$first_backend" "$first_session"; then
       _event_cap_ok=1
     else
       _event_cap_ok=0
@@ -3256,7 +3282,7 @@ event_wait_or_sleep() {
   TMPDIR=${WATCHER_WAIT_TMP:-${TMPDIR:-/tmp}} FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 watcher_waited \
     fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}"
   rc=$?
-  rec=$WATCHER_CAPTURE
+  rec=$WATCHER_RESULT
   fm_wait_tmp_cleanup
   case "$rc" in
     0)
@@ -3651,17 +3677,18 @@ while :; do
   # parent reports, observe backend busy/idle turn completion, send one recovery
   # repost after grace, and escalate once if the recovery turn is also missed.
   # No conversation scraping; unresolved records are never silently expired.
-  fm_pending_reply_tick "$STATE" || true
+  watcher_waited fm_pending_reply_tick "$STATE" || true
 
   # Endpoint liveness runs before queue observation: a positively dead or
   # missing secondmate endpoint is relaunched here on a bounded cadence, which
   # is also what unsticks that mate's foreign wake queue. The tick's single
   # wake exits the cycle like every other wake, so its marker is stamped before
   # any relaunch and the restarted watcher will not re-probe early.
-  secondmate_liveness_tick || {
+  watcher_waited secondmate_liveness_tick || {
     echo "watcher: secondmate liveness check failed" >&2
     exit 1
   }
+  [ -z "$WATCHER_RESULT" ] || wake "$WATCHER_RESULT"
 
   # A live secondmate endpoint does not prove that its own wake loop is alive.
   # Observe the foreign queue before the rest of this cycle so an aged row wakes
@@ -3897,7 +3924,7 @@ EOF
     # bin/fm-supervise-daemon.sh).
     # shellcheck disable=SC2086  # same space-separated status-path list
     if afk_present || [ "$signal_actionable" -eq 0 ] \
-      || { ! signal_crew_provably_working $files && ! signal_turnend_panes_churned $files; }; then
+      || { ! watcher_waited signal_crew_provably_working $files && ! signal_turnend_panes_churned $files; }; then
       while IFS=$(printf '\t') read -r sf sig f; do
         [ -n "$sf" ] || continue
         file_reason="$reason"
@@ -4020,7 +4047,8 @@ EOF
         # The pane is idle/stale at hash $h. Triage decides whether this wakes
         # firstmate. Detection itself is unchanged from above.
         if [ "$kind" = secondmate ]; then
-          case "$(pause_state_class "$w" "$task")" in
+          watcher_waited pause_state_class "$w" "$task" || true
+          case "$WATCHER_RESULT" in
             paused) handle_paused_stale "$w" "$task" "$h" ;;
             *)      clear_pause_tracking "$key" ;;
           esac
@@ -4054,7 +4082,7 @@ EOF
           # authoritative source fm-crew-state.sh itself already prioritizes
           # over the log) a chance to override before trusting the log.
           if [ "$(cat "$sf" 2>/dev/null || true)" != "$h" ]; then
-            if crew_is_provably_working "$(window_to_task "$w" "$STATE")"; then
+            if watcher_waited crew_is_provably_working "$(window_to_task "$w" "$STATE")"; then
               printf '%s' "$h" > "$sf"
               # Pre-cap shape kept the count here (keep-count contract).
               wedge_episode_end "$key" 0 1
@@ -4130,7 +4158,8 @@ EOF
           #     wait out the timer.
           if [ "$(cat "$sf" 2>/dev/null || true)" != "$h" ]; then
             task=$(window_to_task "$w" "$STATE")
-            case "$(pause_state_class "$w" "$task")" in
+            watcher_waited pause_state_class "$w" "$task" || true
+            case "$WATCHER_RESULT" in
               working)
                 clear_pause_tracking "$key"
                 printf '%s' "$h" > "$sf"
@@ -4150,7 +4179,8 @@ EOF
           else
             task=$(window_to_task "$w" "$STATE")
             if [ -e "$pf" ] || status_is_paused_or_captain_held "$(status_declared_wait_line "$STATE/$task.status")"; then
-              case "$(pause_state_class "$w" "$task")" in
+              watcher_waited pause_state_class "$w" "$task" || true
+              case "$WATCHER_RESULT" in
                 paused)  handle_paused_stale "$w" "$task" "$h" ;;
                 working) clear_pause_state "$key"
                          printf '%s' "$h" > "$sf"
@@ -4197,7 +4227,8 @@ EOF
       fi
       task=$(window_to_task "$w" "$STATE")
       if ! afk_present && status_is_paused_or_captain_held "$(status_declared_wait_line "$STATE/$task.status")" && [ "$busy_now" -ne 0 ]; then
-        case "$(pause_state_class "$w" "$task")" in
+        watcher_waited pause_state_class "$w" "$task" || true
+        case "$WATCHER_RESULT" in
           paused) handle_paused_stale "$w" "$task" "$h" ;;
           # Inconclusive, but the declared wait itself still stands, so only the
           # per-hash bookkeeping resets. The re-surface throttle bounds the
