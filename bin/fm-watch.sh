@@ -3045,6 +3045,8 @@ watcher_capture_process() {  # <backend> <target> <lines> [expected-label] [capt
 # so a stop is not held for a blocked read (watcher_stop_signals). Every live
 # endpoint read reached by a poll belongs here, including busy classification,
 # liveness, crew-state helpers, inbox delivery checks, and the event wait.
+# Preserve the command's exit status and stderr; only stdout becomes the result.
+# A caller that intentionally discards diagnostics must redirect them itself.
 # Call directly in the watcher shell, never inside $(...) or another waited
 # command: cleanup must own the group in the shell receiving the stop signal.
 # The group is recorded like a check's, so watcher_cleanup stops one still in
@@ -3059,9 +3061,10 @@ watcher_waited() {  # <command...>
   trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
   # The group's stderr is redirected before the fork: bash 3.2 on macOS can
   # print a harmless "child setpgid ... Operation not permitted" race from the
-  # child before the command's own redirections apply.
+  # child before the command's own redirections apply. Save the caller's stderr
+  # across that fork, then restore it for the command so its diagnostics survive.
   set -m
-  { "$@" < /dev/null > "$FM_CAPTURE_OUTPUT" & } 2>/dev/null
+  { "$@" < /dev/null > "$FM_CAPTURE_OUTPUT" 2>&9 9>&- & } 9>&2 2>/dev/null
   FM_ACTIVE_CHECK_PID=$!
   FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
   set +m
@@ -3086,7 +3089,7 @@ watcher_waited() {  # <command...>
 # Keep its output separate so later probes cannot overwrite the captured tail.
 watcher_capture() {  # <backend> <target> <lines> [expected-label]
   local rc=0
-  watcher_waited watcher_capture_process "$@" || rc=$?
+  watcher_waited watcher_capture_process "$@" 2>/dev/null || rc=$?
   WATCHER_CAPTURE=$WATCHER_RESULT
   return "$rc"
 }
@@ -3280,7 +3283,7 @@ event_wait_or_sleep() {
   fm_wait_tmp_cleanup
   WATCHER_WAIT_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-watch-wait.XXXXXX") || WATCHER_WAIT_TMP=
   TMPDIR=${WATCHER_WAIT_TMP:-${TMPDIR:-/tmp}} FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 watcher_waited \
-    fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}"
+    fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}" 2>/dev/null
   rc=$?
   rec=$WATCHER_RESULT
   fm_wait_tmp_cleanup
